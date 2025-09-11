@@ -24,7 +24,7 @@ from googleapiclient.discovery import build
 # ---------------- CONFIG ----------------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CREDENTIALS_JSON = os.environ["GOOGLE_CREDENTIALS_JSON"]
-NOMBRE_CARPETA_DRIVE = "ASISTENCIA - SGA ALTO VALOR"
+NOMBRE_CARPETA_DRIVE = "ASISTENCIA_SGA_ALTOVALOR"
 DRIVE_ID = "0AOy_EhsaSY_HUk9PVA"
 
 # Zona horaria
@@ -319,4 +319,5 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
