@@ -321,18 +321,20 @@ def es_chat_privado(update: Update) -> bool:
 
 # ================== BOT INFO ==================
 BOT_USERNAME = None
+
 async def init_bot_info(app):
     global BOT_USERNAME
     bot_info = await app.bot.get_me()
     BOT_USERNAME = f"@{bot_info.username}"
 
-    # Si había webhook activo y ahora vas con polling, elimínalo
+    # Si había webhook, elimínalo para evitar conflictos con polling
     w = await app.bot.get_webhook_info()
     if w.url:
-        logging.info(f"[BOOT] Webhook activo en {w.url}. Eliminándolo para usar polling…")
+        logging.info(f"[BOOT] Webhook activo en {w.url}. Eliminando para usar polling…")
         await app.bot.delete_webhook(drop_pending_updates=True)
 
     logger.info(f"Bot iniciado como {BOT_USERNAME}")
+
 
 
 # ================== VALIDACIONES ==================
@@ -399,7 +401,7 @@ async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_
     ud = user_data.setdefault(chat_id, {})
 
     try:
-        # feedback rápido para saber que el callback llegó
+        # feedback para confirmar que el callback llegó
         await query.answer("Creando registro…")
 
         if query.data == "corregir_nombre":
@@ -417,19 +419,20 @@ async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_
                 await query.edit_message_text("⚠️ No encontré el nombre. Escríbelo y confirma.")
                 return
 
-            # 1) Garantizar el único spreadsheet global + headers
+            # 1) Sheet global + headers
             ssid = ensure_global_spreadsheet()
             ensure_sheet_and_headers(ssid)
+            logger.info(f"[FLOW] usando ssid={ssid}")
 
-            # 2) Crear la fila base solo si aún no existe
+            # 2) Fila base (solo una vez)
             if not ud.get("spreadsheet_id") or not ud.get("row"):
                 base = {"CUADRILLA": ud["cuadrilla"], "TIPO DE CUADRILLA": ""}
                 row = append_base_row(ssid, base)
                 ud["spreadsheet_id"] = ssid
                 ud["row"] = row
-                logger.info(f"[OK] Fila base creada: sheet={ssid}, row={row}, cuadrilla={ud['cuadrilla']}")
+                logger.info(f"[OK] Fila base creada: row={row}, cuadrilla='{ud['cuadrilla']}'")
 
-            # 3) Avanza a seleccionar tipo
+            # 3) Avanza a tipo de cuadrilla
             ud["paso"] = "tipo"
             keyboard = [
                 [InlineKeyboardButton("🟢 Disponibilidad", callback_data="tipo_disp")],
@@ -441,7 +444,7 @@ async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
 
-    except Exception as e:
+    except Exception:
         logger.exception("[handle_nombre_cuadrilla] Error")
         try:
             await query.message.reply_text(
@@ -450,6 +453,16 @@ async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_
             )
         except Exception:
             pass
+
+async def debug_callback_catcher(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        data = update.callback_query.data if update.callback_query else None
+        logger.info(f"[DEBUG] Callback recibido: {data}")
+        # responde algo breve para confirmar que llegó el callback:
+        await update.callback_query.answer("✅ Recibido")
+    except Exception:
+        logger.exception("[DEBUG] error en debug_callback_catcher")
+
 
 
 # ================== TIPO DE CUADRILLA ==================
@@ -683,25 +696,31 @@ def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.post_init = init_bot_info
 
-    # Comandos
+    # --- DEBUG: atrapa cualquier callback primero ---
+    app.add_handler(CallbackQueryHandler(debug_callback_catcher, block=False), group=-1)
+
+    # --- COMANDOS ---
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("ingreso", ingreso))
     app.add_handler(CommandHandler("breakout", breakout))
     app.add_handler(CommandHandler("breakin", breakin))
     app.add_handler(CommandHandler("salida", salida))
 
-    # Mensajes
+    # --- MENSAJES ---
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, nombre_cuadrilla))
     app.add_handler(MessageHandler(filters.PHOTO, manejar_fotos))
     app.add_handler(MessageHandler(filters.LOCATION, manejar_ubicacion))
 
-    # Callbacks
+    # --- CALLBACKS REALES ---
     app.add_handler(CallbackQueryHandler(handle_nombre_cuadrilla, pattern="^(confirmar_nombre|corregir_nombre)$"))
     app.add_handler(CallbackQueryHandler(handle_tipo_cuadrilla, pattern="^tipo_(disp|reg)$"))
     app.add_handler(CallbackQueryHandler(manejar_repeticiones, pattern="^repetir_"))
 
-    # Errores
+    # --- ERRORES ---
     app.add_error_handler(log_error)
+
+    # --- ARRANQUE EN POLLING ---
+    app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
 
     print("🚀 Bot de Asistencia (privado) en ejecución...")
     app.run_polling()
