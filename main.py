@@ -68,8 +68,10 @@ HEADERS = [
 COL = {h: chr(65+i) for i, h in enumerate(HEADERS)}
 
 # ---------------- SPREADSHEET ----------------
+
 def get_or_create_main_spreadsheet() -> str:
     try:
+        # Buscar si ya existe en la carpeta dentro de la unidad compartida
         results = drive_service.files().list(
             q=f"name='{SPREADSHEET_NAME}' and '{MAIN_FOLDER_ID}' in parents and trashed=false",
             corpora="drive",
@@ -85,6 +87,19 @@ def get_or_create_main_spreadsheet() -> str:
     except Exception as e:
         logger.error(f"❌ Error buscando archivo en Drive: {e}")
 
+    # Verificar que la carpeta exista antes de crear
+    try:
+        folder_check = drive_service.files().get(
+            fileId=MAIN_FOLDER_ID,
+            fields="id, name",
+            supportsAllDrives=True
+        ).execute()
+        logger.info(f"📂 Carpeta encontrada: {folder_check['name']} ({folder_check['id']})")
+    except Exception as e:
+        logger.error(f"❌ No se pudo acceder a la carpeta: {e}")
+        raise
+
+    # Crear si no existe
     logger.info("📄 No existe spreadsheet, creando uno nuevo en la carpeta...")
     meta = {
         "name": SPREADSHEET_NAME,
@@ -96,7 +111,9 @@ def get_or_create_main_spreadsheet() -> str:
         fields="id",
         supportsAllDrives=True
     ).execute()
+
     ssid = created["id"]
+    logger.info(f"✅ Spreadsheet creado en la carpeta: {ssid}")
 
     # Crear hoja y headers
     sheets_service.spreadsheets().values().update(
@@ -105,7 +122,9 @@ def get_or_create_main_spreadsheet() -> str:
         valueInputOption="RAW",
         body={"values": [HEADERS]}
     ).execute()
+
     return ssid
+
 
 # ---------------- SHEET HELPERS ----------------
 def append_row(ssid: str, data: dict) -> int:
