@@ -387,6 +387,43 @@ async def validar_contenido(update: Update, tipo: str):
         return False
     return True
 
+#========== validar flujo =====
+
+async def validar_flujo(update: Update, chat_id: int) -> bool:
+    ud = user_data.get(chat_id, {})
+    paso = ud.get("paso")
+
+    if paso == 0 and not update.message.text:
+        await update.message.reply_text("⚠️ Aquí solo debes escribir el *nombre de la cuadrilla*. ✍️")
+        return False
+    
+    if paso == "esperando_selfie_inicio" and not update.message.photo:
+        await update.message.reply_text("📸 Aquí solo debes enviar tu *selfie de inicio*. 🤳")
+        return False
+    
+    if paso == "esperando_live_inicio":
+        if not update.message.location or not getattr(update.message.location, "live_period", None):
+            await update.message.reply_text("📍 Debes compartir tu *ubicación en tiempo real*, no una ubicación fija.")
+            return False
+
+    if paso == "esperando_selfie_salida" and not update.message.photo:
+        await update.message.reply_text("📸 Aquí solo debes enviar tu *selfie de salida*. 🤳")
+        return False
+    
+    if paso == "esperando_live_salida":
+        if not update.message.location or not getattr(update.message.location, "live_period", None):
+        await update.message.reply_text("📍 Aquí solo debes compartir tu *ubicación final en tiempo real*. 🔴")
+        return False
+
+    # al final de validar_flujo
+    
+    if paso not in (0, "esperando_selfie_inicio", "esperando_live_inicio", "esperando_selfie_salida", "esperando_live_salida"):
+        await update.message.reply_text("⚠️ Ahora no puedes enviar este tipo de contenido. Sigue el flujo del registro.")
+        return False
+    
+    return True
+
+
 # ================== COMANDOS ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not es_chat_privado(update):
@@ -422,9 +459,15 @@ async def nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not es_chat_privado(update):
         return
     chat_id = update.effective_chat.id
+    
+    # 🚦 Validación: solo aceptar TEXTO en este paso
+    if not await validar_flujo(update, chat_id):
+        return    
+        
     ud = user_data.setdefault(chat_id, {"paso": 0})
     if ud.get("paso") != 0:
         return
+
     if not await validar_contenido(update, "texto"):
         return
 
@@ -669,8 +712,12 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Solo chat privado y mensajes con location
     if not es_chat_privado(update) or not update.message or not update.message.location:
         return
-
     chat_id = update.effective_chat.id
+
+    # 🚦 Validación: solo aceptar UBICACIÓN en este paso
+    if not await validar_flujo(update, chat_id):
+        return
+    
     ud = user_data.setdefault(chat_id, {})
     ssid, row = ud.get("spreadsheet_id"), ud.get("row")
     if not ssid or not row:
@@ -723,6 +770,11 @@ async def breakout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ud = user_data.setdefault(chat_id, {})
     ssid, row = ud.get("spreadsheet_id"), ud.get("row")
 
+    # 🚦 Validación: solo si está en jornada activa
+    if ud.get("paso") != "en_jornada":
+        await update.message.reply_text("⚠️ No puedes registrar un Break todavía. Primero completa tu ingreso.")
+        return
+
     # Validaciones
     if not ssid or not row:
         await update.message.reply_text("⚠️ No hay jornada activa. Usa /ingreso para iniciar.")
@@ -753,6 +805,11 @@ async def breakin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ud = user_data.setdefault(chat_id, {})
     ssid, row = ud.get("spreadsheet_id"), ud.get("row")
 
+    # 🚦 Validación: solo si hizo Break Out antes
+    if ud.get("paso") != "break_out":
+        await update.message.reply_text("⚠️ No puedes registrar un Break In sin haber hecho Break Out antes.")
+        return
+
     if not ssid or not row:
         await update.message.reply_text("⚠️ No hay jornada activa. Usa /ingreso para iniciar.")
         return
@@ -782,6 +839,11 @@ async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     ud = user_data.setdefault(chat_id, {})
     ssid, row = ud.get("spreadsheet_id"), ud.get("row")
+
+    # 🚦 Validación: solo si completó breakin
+    if ud.get("paso") != "en_jornada":
+        await update.message.reply_text("⚠️ No puedes registrar salida sin haber regresado de Break In.")
+        return
 
     # Validación: debe existir jornada activa
     if not ssid or not row:
@@ -878,7 +940,10 @@ async def manejar_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         chat_id = update.effective_chat.id
         paso = user_data.get(chat_id, {}).get("paso")
-
+        
+    # 🚦 Validación: solo aceptar FOTO en este paso
+        if not await validar_flujo(update, chat_id):
+            return
         if update.message.reply_to_message:
             if update.message.reply_to_message.message_id == user_data.get(chat_id, {}).get("msg_id_motivador"):
                 return
