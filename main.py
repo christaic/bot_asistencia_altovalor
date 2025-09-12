@@ -1,8 +1,6 @@
 import os
 import json
 import logging
-import asyncio
-import unicodedata, re
 from datetime import datetime
 from pytz import timezone
 from telegram import (
@@ -26,6 +24,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 CREDENTIALS_JSON = os.environ["GOOGLE_CREDENTIALS_JSON"]
 NOMBRE_CARPETA_DRIVE = "ASISTENCIA_SGA_ALTOVALOR"
 MAIN_FOLDER_ID = "1OKL_s5Qs8VXbmhWFPDUiJ8qQaQArKQGG7"
+SPREADSHEET_NAME = "ASISTENCIA_CUADRILLAS"
 
 # Zona horaria
 LIMA_TZ = timezone("America/Lima")
@@ -66,29 +65,22 @@ HEADERS = [
 
 COL = {h: chr(65+i) for i, h in enumerate(HEADERS)}
 
-def buscar_archivo(nombre_archivo: str):
-    q = [
-        f"name='{nombre_archivo}'",
-        f"'{MAIN_FOLDER_ID}' in parents",
-        "trashed=false",
-    ]
-    query = " and ".join(q)
+# ---------------- SPREADSHEET ÚNICO ----------------
+def get_or_create_main_spreadsheet() -> str:
+    q = f"name='{SPREADSHEET_NAME}' and '{MAIN_FOLDER_ID}' in parents and trashed=false"
     results = drive_service.files().list(
-        q=query,
+        q=q,
         fields="files(id, name)",
         supportsAllDrives=True,
         includeItemsFromAllDrives=True
     ).execute()
     files = results.get("files", [])
-    return files[0] if files else None
+    if files:
+        return files[0]["id"]
 
-def ensure_spreadsheet(nombre: str) -> str:
-    archivo = buscar_archivo(nombre)
-    if archivo:
-        return archivo["id"]
-
+    # Crear si no existe
     meta = {
-        "name": nombre,
+        "name": SPREADSHEET_NAME,
         "mimeType": SHEET_MIME,
         "parents": [MAIN_FOLDER_ID],
     }
@@ -108,6 +100,7 @@ def ensure_spreadsheet(nombre: str) -> str:
     ).execute()
     return ssid
 
+# ---------------- SHEET HELPERS ----------------
 def append_row(ssid: str, data: dict) -> int:
     row_vals = [[data.get(h, "") for h in HEADERS]]
     resp = sheets_service.spreadsheets().values().append(
@@ -132,6 +125,7 @@ def update_cell(ssid: str, row: int, header: str, value: str):
 
 # ---------------- BOT DATA ----------------
 user_data = {}
+SPREADSHEET_ID = get_or_create_main_spreadsheet()
 
 # ---------------- VALIDACIÓN ----------------
 async def validar_contenido(update: Update, tipo: str):
@@ -181,11 +175,9 @@ async def handle_tipo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data[chat_id]["tipo"] = tipo
     user_data[chat_id]["paso"] = 2
 
-    # Crear fila base
-    ssid = ensure_spreadsheet("ASISTENCIA_CUADRILLAS")
-    user_data[chat_id]["spreadsheet_id"] = ssid
+    # Crear fila base en el único spreadsheet
     ahora = datetime.now(LIMA_TZ).strftime("%Y-%m-%d %H:%M")
-    fila = append_row(ssid, {
+    fila = append_row(SPREADSHEET_ID, {
         "FECHA Y HORA": ahora,
         "NOMBRE DE CUADRILLA": user_data[chat_id]["cuadrilla"],
         "TIPO DE CUADRILLA": tipo
@@ -200,7 +192,6 @@ async def handle_tipo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def manejar_foto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     paso = user_data.get(chat_id, {}).get("paso")
-    ssid = user_data.get(chat_id, {}).get("spreadsheet_id")
     row = user_data.get(chat_id, {}).get("row")
 
     # Paso 2: foto cuadrilla
@@ -208,7 +199,7 @@ async def manejar_foto(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await validar_contenido(update, "foto"):
             return
         user_data[chat_id]["paso"] = 3
-        update_cell(ssid, row, "FOTO DE CUADRILLA", "OK")
+        update_cell(SPREADSHEET_ID, row, "FOTO DE CUADRILLA", "OK")
         await update.message.reply_text("✅ Foto recibida.\n\n📍 Envía ahora la *ubicación de ingreso*.")
 
     # Paso 8: foto salida
@@ -216,13 +207,12 @@ async def manejar_foto(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await validar_contenido(update, "foto"):
             return
         user_data[chat_id]["paso"] = 9
-        update_cell(ssid, row, "FOTO DE SALIDA", "OK")
+        update_cell(SPREADSHEET_ID, row, "FOTO DE SALIDA", "OK")
         await update.message.reply_text("✅ Foto de salida recibida.\n\n📍 Envía ahora la *ubicación de salida*.")
 
 async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     paso = user_data.get(chat_id, {}).get("paso")
-    ssid = user_data.get(chat_id, {}).get("spreadsheet_id")
     row = user_data.get(chat_id, {}).get("row")
 
     if not await validar_contenido(update, "ubicacion"):
@@ -233,17 +223,17 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Paso 3: coords ingreso
     if paso == 3:
         user_data[chat_id]["paso"] = 4
-        update_cell(ssid, row, "COORDENADAS INGRESO", f"{lat},{lng}")
+        update_cell(SPREADSHEET_ID, row, "COORDENADAS INGRESO", f"{lat},{lng}")
         hora = datetime.now(LIMA_TZ).strftime("%H:%M")
-        update_cell(ssid, row, "HORA DE INICIO", hora)
+        update_cell(SPREADSHEET_ID, row, "HORA DE INICIO", hora)
         await update.message.reply_text(f"✅ Coordenadas de ingreso guardadas.\n🕑 Inicio registrado {hora}.\n\nUsa /breakout cuando salgas a break.")
 
     # Paso 9: coords salida
     elif paso == 9:
         user_data[chat_id]["paso"] = 10
-        update_cell(ssid, row, "COORDENADAS SALIDA", f"{lat},{lng}")
+        update_cell(SPREADSHEET_ID, row, "COORDENADAS SALIDA", f"{lat},{lng}")
         hora = datetime.now(LIMA_TZ).strftime("%H:%M")
-        update_cell(ssid, row, "HORA DE SALIDA", hora)
+        update_cell(SPREADSHEET_ID, row, "HORA DE SALIDA", hora)
         await update.message.reply_text(
             f"✅ Coordenadas de salida guardadas.\n🕑 Salida registrada {hora}.\n\n🎉 Registro completado con éxito.\n👏 ¡Gracias cuadrilla!"
         )
@@ -251,19 +241,17 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Break out / in
 async def breakout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    ssid = user_data.get(chat_id, {}).get("spreadsheet_id")
     row = user_data.get(chat_id, {}).get("row")
     hora = datetime.now(LIMA_TZ).strftime("%H:%M")
-    update_cell(ssid, row, "HORA DE SALIDA A BREAK", hora)
+    update_cell(SPREADSHEET_ID, row, "HORA DE SALIDA A BREAK", hora)
     user_data[chat_id]["paso"] = 5
     await update.message.reply_text(f"🍽️ Salida a break registrado {hora}. Usa /breakin al volver.")
 
 async def breakin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    ssid = user_data.get(chat_id, {}).get("spreadsheet_id")
     row = user_data.get(chat_id, {}).get("row")
     hora = datetime.now(LIMA_TZ).strftime("%H:%M")
-    update_cell(ssid, row, "HORA DE REGRESO DE BREAK", hora)
+    update_cell(SPREADSHEET_ID, row, "HORA DE REGRESO DE BREAK", hora)
     user_data[chat_id]["paso"] = 7
     await update.message.reply_text(f"🚶 Regreso de break registrado {hora}.")
 
@@ -291,9 +279,4 @@ def main():
     app.run_polling()
 
 if __name__ == "__main__":
-
     main()
-
-
-
-
