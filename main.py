@@ -66,32 +66,6 @@ HEADERS = [
 
 COL = {h: chr(65+i) for i, h in enumerate(HEADERS)}
 
-def get_or_create_main_folder():
-    query = f"name='{NOMBRE_CARPETA_DRIVE}' and '{DRIVE_ID}' in parents and trashed=false"
-    results = drive_service.files().list(
-        q=query,
-        fields="files(id, name)",
-        supportsAllDrives=True,
-        includeItemsFromAllDrives=True
-    ).execute()
-    files = results.get("files", [])
-    if files:
-        return files[0]["id"]
-
-    metadata = {
-        "name": NOMBRE_CARPETA_DRIVE,
-        "mimeType": "application/vnd.google-apps.folder",
-        "parents": [DRIVE_ID]
-    }
-    folder = drive_service.files().create(
-        body=metadata,
-        fields="id",
-        supportsAllDrives=True
-    ).execute()
-    return folder["id"]
-
-MAIN_FOLDER_ID = get_or_create_main_folder()
-
 def buscar_archivo(nombre_archivo: str):
     q = [
         f"name='{nombre_archivo}'",
@@ -319,6 +293,7 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
 
