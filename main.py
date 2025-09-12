@@ -981,7 +981,5 @@ def main():
     app.add_error_handler(log_error)
 
     # --- ARRANQUE EN POLLING ---
+    logger.info("🚀 Bot de Asistencia (privado) en ejecución...")
     app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
-
-    print("🚀 Bot de Asistencia (privado) en ejecución...")
-    app.run_polling()
