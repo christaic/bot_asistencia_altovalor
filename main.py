@@ -157,8 +157,10 @@ def upload_image_and_get_link(image_bytes: io.BytesIO, filename: str) -> str:
     Sube una imagen a la carpeta IMAGENES y devuelve un enlace webViewLink.
     Intenta poner permiso 'anyone with the link' como lector (si la política lo permite).
     """
+    image_bytes.seek(0)
     media = MediaIoBaseUpload(image_bytes, mimetype="image/jpeg", resumable=False)
     metadata = {"name": filename, "parents": [IMAGES_FOLDER_ID]}
+    
     file = drive_service.files().create(
         body=metadata,
         media_body=media,
@@ -513,6 +515,7 @@ async def handle_tipo_cuadrilla(update: Update, context: ContextTypes.DEFAULT_TY
     )
 
 # ================== FOTO INICIO + HORA INGRESO ==================
+
 async def foto_ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not es_chat_privado(update):
         return
@@ -528,46 +531,57 @@ async def foto_ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ No hay registro activo. Usa /ingreso para iniciar.")
         return
 
-    # ---- Subir selfie a Drive y obtener URL ----
+    # 1) Descargar la foto de Telegram a memoria
+    photo = update.message.photo[-1]  # mayor resolución
+    buff = io.BytesIO()
     try:
-        photo = update.message.photo[-1]  # mayor resolución
-        tg_file = await context.bot.get_file(photo.file_id, timeout=60)
-        buff = io.BytesIO()
-
-        # Reintentos por si la red está lenta
+        tg_file = await context.bot.get_file(photo.file_id)
         for attempt in range(3):
             try:
-                await tg_file.download_to_memory(out=buff, timeout=120)  # ✅ v20+
+                await tg_file.download_to_memory(out=buff)
                 break
             except Exception as e:
                 if attempt == 2:
                     raise
-                await asyncio.sleep(2 * (attempt + 1))  # 2s, 4s
-
+                await asyncio.sleep(2 * (attempt + 1))
         buff.seek(0)
+    except Exception as e:
+        logger.error(f"[ERROR] Descargando foto TG (inicio): {e}")
+        await update.message.reply_text("⚠️ No pude leer la foto desde Telegram. Reenvíala, por favor.")
+        return
 
+    # 2) Subir a Drive y guardar link en el Sheet
+    try:
         filename = f"selfie_inicio_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
         link = upload_image_and_get_link(buff, filename)
         gs_set_by_header(ssid, row, "SELFIE CUADRILLA", link)
     except Exception as e:
         logger.error(f"[ERROR] Subiendo selfie inicio a Drive: {e}")
-        await update.message.reply_text("⚠️ No pude subir la foto a Drive. Igual continúa, puedes reenviarla si deseas.")
+        await update.message.reply_text("⚠️ No pude subir la foto a Drive. Intenta otra vez.")
+        return
 
-    # Registrar HORA INGRESO
-    hora_ingreso = datetime.now(LIMA_TZ).strftime("%H:%M")
+    # 3) Registrar hora de ingreso
+    hora = datetime.now(LIMA_TZ).strftime("%H:%M")
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(
-        None, update_single_cell, ssid, SHEET_TITLE, COL["HORA INGRESO"], row, hora_ingreso
+        None,
+        update_single_cell,
+        ssid,
+        SHEET_TITLE,
+        COL["HORA INGRESO"],
+        row,
+        hora
+    )
+    ud["hora_ingreso"] = hora
+    ud["paso"] = 2
+    user_data[chat_id] = ud
+
+    await update.message.reply_text(
+        f"⏱️ Hora de ingreso registrada: *{hora}*.\n\n"
+        "📍 Ahora comparte tu *ubicación actual* (clip ➜ Ubicación).",
+        parse_mode="Markdown",
     )
 
-    ud["hora_ingreso"] = hora_ingreso
-    ud["paso"] = 2  # siguiente: ubicación
-    await update.message.reply_text(
-        f"⏱️ Hora de ingreso registrada: *{hora_ingreso}*.\n\n"
-        "📍 Ahora comparte tu *ubicación actual* (clip ➜ Ubicación).",
-        parse_mode="Markdown"
-    )
-    user_data[chat_id] = ud
 
 # ================== UBICACIÓN INICIO / SALIDA ==================
 async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -600,7 +614,9 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
         gs_set_by_header(ssid, row, "LONGITUD SALIDA", f"{lng:.6f}")
         ud["paso"] = None
         await update.message.reply_text(
-            "🫡 *¡Registro finalizado!* Gracias por tu apoyo hoy.",
+            "🫡 ¡Registro finalizado!\n\n"
+            "Gracias por tu apoyo hoy.\n"
+            "¡Jornada finalizada! 🙌",
             parse_mode="Markdown"
         )
 
@@ -655,9 +671,9 @@ async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ud["paso"] = "selfie_salida"
     await update.message.reply_text("📸 Envía tu *selfie de salida* para finalizar.", parse_mode="Markdown")
 
+
+
 async def selfie_salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not es_chat_privado(update):
-        return
     chat_id = update.effective_chat.id
     ud = user_data.get(chat_id) or {}
     if ud.get("paso") != "selfie_salida":
@@ -667,48 +683,59 @@ async def selfie_salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     ssid, row = ud.get("spreadsheet_id"), ud.get("row")
     if not ssid or not row:
-        await update.message.reply_text("❌ No hay registro activo.")
+        await update.message.reply_text("❌ No hay registro activo. Usa /ingreso para iniciar.")
         return
 
-    # ---- Subir selfie de salida a Drive y escribir URL ----
+    # 1) Descargar a memoria
+    photo = update.message.photo[-1]
+    buff = io.BytesIO()
     try:
-        photo = update.message.photo[-1]
-        tg_file = await context.bot.get_file(photo.file_id, timeout=60)
-        buff = io.BytesIO()
-
-        # Reintentos por si la red está lenta
+        tg_file = await context.bot.get_file(photo.file_id)
         for attempt in range(3):
             try:
-                await tg_file.download_to_memory(out=buff, timeout=120)  # ✅ v20+
+                await tg_file.download_to_memory(out=buff)
                 break
             except Exception as e:
                 if attempt == 2:
                     raise
-                await asyncio.sleep(2 * (attempt + 1))  # 2s, 4s
-
+                await asyncio.sleep(2 * (attempt + 1))
         buff.seek(0)
+    except Exception as e:
+        logger.error(f"[ERROR] Descargando foto TG (salida): {e}")
+        await update.message.reply_text("⚠️ No pude leer la foto desde Telegram. Reenvíala, por favor.")
+        return
 
+    # 2) Subir a Drive y guardar link
+    try:
         filename = f"selfie_salida_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
         link = upload_image_and_get_link(buff, filename)
         gs_set_by_header(ssid, row, "SELFIE SALIDA", link)
     except Exception as e:
         logger.error(f"[ERROR] Subiendo selfie salida a Drive: {e}")
-        await update.message.reply_text("⚠️ No pude subir la foto de salida a Drive. Puedes reenviarla si deseas.")
+        await update.message.reply_text("⚠️ No pude subir la foto a Drive. Reenvíala para continuar.")
+        return
 
-    # Registrar HORA SALIDA
+    # 3) Registrar hora salida y pedir ubicación final
     hora = datetime.now(LIMA_TZ).strftime("%H:%M")
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(
-        None, update_single_cell, ssid, SHEET_TITLE, COL["HORA SALIDA"], row, hora
+        None,
+        update_single_cell,
+        ssid,
+        SHEET_TITLE,
+        COL["HORA SALIDA"],
+        row,
+        hora
     )
-
     ud["paso"] = "ubicacion_salida"
+    user_data[chat_id] = ud
+
     await update.message.reply_text(
         f"⏱️ Hora de salida registrada: *{hora}*.\n\n"
         "📍 Comparte tu *ubicación actual* para finalizar.",
-        parse_mode="Markdown"
+        parse_mode="Markdown",
     )
-    user_data[chat_id] = ud
+
 
 # ================== ROUTER DE FOTOS ==================
 async def manejar_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE):
