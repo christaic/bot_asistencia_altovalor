@@ -24,8 +24,8 @@ LIMA_TZ = timezone("America/Lima")
 
 # ================== CONFIGURACIÓN ==================
 BOT_TOKEN = os.getenv("BOT_TOKEN")  # Token del bot
-NOMBRE_CARPETA_DRIVE = "ASISTENCIA_BOT"  # Carpeta principal en la unidad compartida
-DRIVE_ID = "0AOy_EhsaSY_HUk9PVA"        # ID de la unidad compartida (Shared Drive)
+NOMBRE_CARPETA_DRIVE = "ASISTENCIA_SGA_ALTOVALOR"  # Carpeta principal en la unidad compartida
+DRIVE_ID = "0AN8pG_lPt1dtUk9PVA"        # ID de la unidad compartida (Shared Drive)
 
 # --- ÚNICO SPREADSHEET GLOBAL ---
 GLOBAL_SHEET_NAME = "ASISTENCIA_CUADRILLAS_DISP_ALTO_VALOR"
