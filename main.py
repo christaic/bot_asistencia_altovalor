@@ -86,7 +86,7 @@ def get_or_create_main_spreadsheet() -> str:
             logger.info("📂 Creando carpeta nueva en la unidad compartida...")
 
             meta_folder = {
-                "name": NOMBRE_CARPETA_DRIVE,
+                "name": "ASISTENCIA_SGA_ALTOVALOR",
                 "mimeType": "application/vnd.google-apps.folder",
                 "parents": [],  # raíz de la unidad compartida
             }
@@ -96,7 +96,7 @@ def get_or_create_main_spreadsheet() -> str:
                 supportsAllDrives=True
             ).execute()
             folder_id = new_folder["id"]
-            logger.info(f"✅ Carpeta creada: {NOMBRE_CARPETA_DRIVE} ({folder_id})")
+            logger.info(f"✅ Carpeta creada: ASISTENCIA_SGA_ALTOVALOR ({folder_id})")
 
         # Buscar el spreadsheet dentro de la carpeta
         results = drive_service.files().list(
