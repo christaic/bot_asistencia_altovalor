@@ -531,10 +531,21 @@ async def foto_ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ---- Subir selfie a Drive y obtener URL ----
     try:
         photo = update.message.photo[-1]  # mayor resolución
-        tg_file = await context.bot.get_file(photo.file_id)
+        tg_file = await context.bot.get_file(photo.file_id, timeout=60)
         buff = io.BytesIO()
-        await tg_file.download(out=buff)
+
+        # Reintentos por si la red está lenta
+        for attempt in range(3):
+            try:
+                await tg_file.download_to_memory(out=buff, timeout=120)  # ✅ v20+
+                break
+            except Exception as e:
+                if attempt == 2:
+                    raise
+                await asyncio.sleep(2 * (attempt + 1))  # 2s, 4s
+
         buff.seek(0)
+
         filename = f"selfie_inicio_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
         link = upload_image_and_get_link(buff, filename)
         gs_set_by_header(ssid, row, "SELFIE CUADRILLA", link)
@@ -662,10 +673,21 @@ async def selfie_salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ---- Subir selfie de salida a Drive y escribir URL ----
     try:
         photo = update.message.photo[-1]
-        tg_file = await context.bot.get_file(photo.file_id)
+        tg_file = await context.bot.get_file(photo.file_id, timeout=60)
         buff = io.BytesIO()
-        await tg_file.download(out=buff)
+
+        # Reintentos por si la red está lenta
+        for attempt in range(3):
+            try:
+                await tg_file.download_to_memory(out=buff, timeout=120)  # ✅ v20+
+                break
+            except Exception as e:
+                if attempt == 2:
+                    raise
+                await asyncio.sleep(2 * (attempt + 1))  # 2s, 4s
+
         buff.seek(0)
+
         filename = f"selfie_salida_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
         link = upload_image_and_get_link(buff, filename)
         gs_set_by_header(ssid, row, "SELFIE SALIDA", link)
