@@ -325,7 +325,15 @@ async def init_bot_info(app):
     global BOT_USERNAME
     bot_info = await app.bot.get_me()
     BOT_USERNAME = f"@{bot_info.username}"
+
+    # Si había webhook activo y ahora vas con polling, elimínalo
+    w = await app.bot.get_webhook_info()
+    if w.url:
+        logging.info(f"[BOOT] Webhook activo en {w.url}. Eliminándolo para usar polling…")
+        await app.bot.delete_webhook(drop_pending_updates=True)
+
     logger.info(f"Bot iniciado como {BOT_USERNAME}")
+
 
 # ================== VALIDACIONES ==================
 async def validar_contenido(update: Update, tipo: str):
@@ -386,46 +394,63 @@ async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query
     if not query or not es_chat_privado(update):
         return
-    await query.answer()
+
     chat_id = query.message.chat.id
     ud = user_data.setdefault(chat_id, {})
 
-    if query.data == "corregir_nombre":
-        ud["paso"] = 0
-        ud["cuadrilla"] = ""
-        await query.edit_message_text(
-            "✍️ *Escribe el nombre de tu cuadrilla nuevamente.*",
-            parse_mode="Markdown"
-        )
-        return
+    try:
+        # feedback rápido para saber que el callback llegó
+        await query.answer("Creando registro…")
 
-    if query.data == "confirmar_nombre":
-        if not ud.get("cuadrilla"):
+        if query.data == "corregir_nombre":
             ud["paso"] = 0
-            await query.edit_message_text("⚠️ No encontré el nombre. Escríbelo y confirma.")
+            ud["cuadrilla"] = ""
+            await query.edit_message_text(
+                "✍️ *Escribe el nombre de tu cuadrilla nuevamente.*",
+                parse_mode="Markdown"
+            )
             return
 
-        # Garantizar spreadsheet global y headers
-        ssid = ensure_global_spreadsheet()
-        ensure_sheet_and_headers(ssid)
+        if query.data == "confirmar_nombre":
+            if not ud.get("cuadrilla"):
+                ud["paso"] = 0
+                await query.edit_message_text("⚠️ No encontré el nombre. Escríbelo y confirma.")
+                return
 
-        # Crear fila base (una sola vez)
-        if not ud.get("spreadsheet_id") or not ud.get("row"):
-            base = {"CUADRILLA": ud["cuadrilla"], "TIPO DE CUADRILLA": ""}
-            row = append_base_row(ssid, base)
-            ud["spreadsheet_id"] = ssid
-            ud["row"] = row
+            # 1) Garantizar el único spreadsheet global + headers
+            ssid = ensure_global_spreadsheet()
+            ensure_sheet_and_headers(ssid)
 
-        ud["paso"] = "tipo"
-        keyboard = [
-            [InlineKeyboardButton("🟢 Disponibilidad", callback_data="tipo_disp")],
-            [InlineKeyboardButton("⚪ Regular", callback_data="tipo_reg")],
-        ]
-        await query.edit_message_text(
-            "Selecciona el *tipo de cuadrilla*:",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+            # 2) Crear la fila base solo si aún no existe
+            if not ud.get("spreadsheet_id") or not ud.get("row"):
+                base = {"CUADRILLA": ud["cuadrilla"], "TIPO DE CUADRILLA": ""}
+                row = append_base_row(ssid, base)
+                ud["spreadsheet_id"] = ssid
+                ud["row"] = row
+                logger.info(f"[OK] Fila base creada: sheet={ssid}, row={row}, cuadrilla={ud['cuadrilla']}")
+
+            # 3) Avanza a seleccionar tipo
+            ud["paso"] = "tipo"
+            keyboard = [
+                [InlineKeyboardButton("🟢 Disponibilidad", callback_data="tipo_disp")],
+                [InlineKeyboardButton("⚪ Regular", callback_data="tipo_reg")],
+            ]
+            await query.edit_message_text(
+                "Selecciona el *tipo de cuadrilla*:",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+
+    except Exception as e:
+        logger.exception("[handle_nombre_cuadrilla] Error")
+        try:
+            await query.message.reply_text(
+                "❌ Ocurrió un error creando el registro en Google Drive/Sheets.\n"
+                "Vuelve a intentar con /ingreso. Revisa los logs en Render para más detalle."
+            )
+        except Exception:
+            pass
+
 
 # ================== TIPO DE CUADRILLA ==================
 async def handle_tipo_cuadrilla(update: Update, context: ContextTypes.DEFAULT_TYPE):
