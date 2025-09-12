@@ -25,7 +25,7 @@ from googleapiclient.discovery import build
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CREDENTIALS_JSON = os.environ["GOOGLE_CREDENTIALS_JSON"]
 NOMBRE_CARPETA_DRIVE = "ASISTENCIA_SGA_ALTOVALOR"
-DRIVE_ID = "0AOy_EhsaSY_HUk9PVA"
+MAIN_FOLDER_ID = "1OKL_s5Qs8VXbmhWFPDUiJ8qQaQArKQGG7"
 
 # Zona horaria
 LIMA_TZ = timezone("America/Lima")
@@ -319,5 +319,6 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
