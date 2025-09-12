@@ -428,10 +428,54 @@ async def validar_flujo(update: Update, chat_id: int) -> bool:
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not es_chat_privado(update):
         return
+
+    comandos = """
+📌 *Funciones disponibles:*
+
+/ingreso – Iniciar registro de asistencia 📝
+/breakout – Registrar salida a Break 🍽️
+/breakin – Registrar regreso de Break 🚶
+/salida – Registrar salida final 📸
+/ayuda – Mostrar instrucciones ℹ️
+"""
+
+    keyboard = [
+        [InlineKeyboardButton("📝 Ingreso", callback_data="nuevo_registro")],
+        [InlineKeyboardButton("🍽️ Break Out", callback_data="breakout")],
+        [InlineKeyboardButton("🚶 Break In", callback_data="breakin")],
+        [InlineKeyboardButton("📸 Salida", callback_data="salida")],
+        [InlineKeyboardButton("ℹ️ Ayuda", callback_data="ayuda")]
+    ]
+
     await update.message.reply_text(
-        "👋 ¡Hola! Este bot funciona por chat privado.\n\n"
-        "Para iniciar tu registro usa /ingreso."
+        "👋 ¡Hola! Bienvenido al bot SGA de asistencia.\n\n" + comandos,
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
+
+async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not es_chat_privado(update):
+        return
+
+    texto = """
+ℹ️ *Instrucciones de uso del bot:*
+
+1️⃣ Usa /ingreso para registrar tu *entrada*.  
+   - Envía el nombre de la cuadrilla  
+   - Luego la selfie de inicio  
+   - Y tu ubicación en tiempo real 📍  
+
+2️⃣ Usa /breakout para registrar la *salida a break*. 🍽️  
+3️⃣ Usa /breakin para registrar el *regreso del break*. 🚶  
+4️⃣ Usa /salida para finalizar tu jornada:  
+   - Selfie de salida 📸  
+   - Ubicación en tiempo real 📍  
+
+⚠️ El flujo es estricto, no puedes saltarte pasos.
+"""
+
+    await update.message.reply_text(texto, parse_mode="Markdown")
+
 
 async def ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not es_chat_privado(update):
@@ -763,36 +807,26 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ================== BREAK OUT / BREAK IN ==================
+
 async def breakout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not es_chat_privado(update):
         return
     chat_id = update.effective_chat.id
     ud = user_data.setdefault(chat_id, {})
-    ssid, row = ud.get("spreadsheet_id"), ud.get("row")
 
-    # 🚦 Validación: solo si está en jornada activa
+    # Validar que está en jornada
     if ud.get("paso") != "en_jornada":
-        await update.message.reply_text("⚠️ No puedes registrar un Break todavía. Primero completa tu ingreso.")
+        await update.message.reply_text("⚠️ Aún no puedes registrar Break Out. Debes haber completado tu ingreso.")
         return
 
-    # Validaciones
+    ssid, row = ud.get("spreadsheet_id"), ud.get("row")
     if not ssid or not row:
         await update.message.reply_text("⚠️ No hay jornada activa. Usa /ingreso para iniciar.")
         return
 
-    # Solo se permite breakout si ya completó ingreso
-    if ud.get("paso") != "en_jornada":
-        await update.message.reply_text("⚠️ No puedes registrar Break Out en este momento.\n\n"
-                                        "Primero completa tu ingreso (selfie + ubicación).")
-        return
-
-    # Registrar hora Break Out
     hora = datetime.now(LIMA_TZ).strftime("%H:%M")
     set_cell_value(ssid, SHEET_TITLE, f"{COL['HORA BREAK OUT']}{row}", hora)
-
-    # Cambiar estado → ahora debe hacer Break In
-    ud["paso"] = "esperando_breakin"
-    user_data[chat_id] = ud
+    ud["paso"] = "en_break"
 
     await update.message.reply_text(f"🍽️ Break Out registrado a las {hora}.\n\n"
                                     "Cuando regreses, usa /breakin.")
@@ -803,72 +837,46 @@ async def breakin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     chat_id = update.effective_chat.id
     ud = user_data.setdefault(chat_id, {})
-    ssid, row = ud.get("spreadsheet_id"), ud.get("row")
 
-    # 🚦 Validación: solo si hizo Break Out antes
-    if ud.get("paso") != "break_out":
-        await update.message.reply_text("⚠️ No puedes registrar un Break In sin haber hecho Break Out antes.")
+    # Validar que está en break
+    if ud.get("paso") != "en_break":
+        await update.message.reply_text("⚠️ No puedes registrar Break In sin antes hacer Break Out.")
         return
 
+    ssid, row = ud.get("spreadsheet_id"), ud.get("row")
     if not ssid or not row:
         await update.message.reply_text("⚠️ No hay jornada activa. Usa /ingreso para iniciar.")
         return
 
-    # Solo se permite breakin si ya hizo breakout
-    if ud.get("paso") != "esperando_breakin":
-        await update.message.reply_text("⚠️ No puedes registrar Break In en este momento.\n\n"
-                                        "Primero debes registrar tu Break Out.")
-        return
-
-    # Registrar hora Break In
     hora = datetime.now(LIMA_TZ).strftime("%H:%M")
     set_cell_value(ssid, SHEET_TITLE, f"{COL['HORA BREAK IN']}{row}", hora)
-
-    # Cambiar estado → ya puede ir a salida
     ud["paso"] = "en_jornada_post_break"
-    user_data[chat_id] = ud
 
     await update.message.reply_text(f"🚶 Regreso de Break registrado a las {hora}.\n\n"
                                     "Cuando termines tu jornada, usa /salida.")
 
 
 # ================== SALIDA ==================
+
 async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not es_chat_privado(update):
         return
     chat_id = update.effective_chat.id
     ud = user_data.setdefault(chat_id, {})
-    ssid, row = ud.get("spreadsheet_id"), ud.get("row")
 
-    # 🚦 Validación: solo si completó breakin
-    if ud.get("paso") != "en_jornada":
-        await update.message.reply_text("⚠️ No puedes registrar salida sin haber regresado de Break In.")
+    # Validar que ya pasó por Break In si hizo un break
+    if ud.get("paso") not in ("en_jornada", "en_jornada_post_break"):
+        await update.message.reply_text("⚠️ No puedes registrar salida todavía. Debes completar los pasos previos.")
         return
 
-    # Validación: debe existir jornada activa
+    ssid, row = ud.get("spreadsheet_id"), ud.get("row")
     if not ssid or not row:
         await update.message.reply_text("⚠️ No hay jornada activa. Usa /ingreso para iniciar.")
         return
 
-    # Validación de flujo: solo se permite salida si ya completó el break
-    if ud.get("paso") != "en_jornada_post_break":
-        await update.message.reply_text(
-            "⚠️ No puedes registrar salida todavía.\n\n"
-            "Primero debes:\n"
-            "1️⃣ Hacer Break Out (/breakout)\n"
-            "2️⃣ Hacer Break In (/breakin)\n"
-            "y luego podrás finalizar con /salida."
-        )
-        return
-
-    # Ahora sí pedimos la selfie de salida
     ud["paso"] = "esperando_selfie_salida"
-    user_data[chat_id] = ud
+    await update.message.reply_text("📸 Envía tu *selfie de salida* para finalizar jornada.", parse_mode="Markdown")
 
-    await update.message.reply_text(
-        "📸 Envía tu *selfie de salida* para finalizar la jornada.",
-        parse_mode="Markdown"
-    )
 
 async def selfie_salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -1088,9 +1096,21 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
             await query.edit_message_text("⚠️ No pude subir la foto a Drive. Reenvíala, por favor.")
 
 
-# ================== CALLBACKS (placeholder) ==================
+# ================== CALLBACKS / AYUDA (placeholder) ==================
 async def manejar_repeticiones(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pass
+
+async def handle_ayuda_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query or not es_chat_privado(update):
+        return
+
+    await query.answer()
+    await query.edit_message_text(
+        "ℹ️ Usa los comandos o botones para registrar tu asistencia paso a paso.\n\n"
+        "Comienza con /ingreso y sigue la secuencia estricta.",
+        parse_mode="Markdown"
+    )
 
 # ================== MAIN ==================
 def main():
@@ -1102,6 +1122,7 @@ def main():
 
     # --- COMANDOS ---
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("ayuda", ayuda))
     app.add_handler(CommandHandler("ingreso", ingreso))
     app.add_handler(CommandHandler("breakout", breakout))
     app.add_handler(CommandHandler("breakin", breakin))
@@ -1113,6 +1134,7 @@ def main():
     app.add_handler(MessageHandler(filters.LOCATION, manejar_ubicacion))
 
     # --- CALLBACKS REALES ---
+    app.add_handler(CallbackQueryHandler(handle_ayuda_callback, pattern="^ayuda$"))
     app.add_handler(CallbackQueryHandler(handle_confirmar_selfie_inicio, pattern="^(confirmar_selfie_inicio|repetir_selfie_inicio)$"))
     app.add_handler(CallbackQueryHandler(handle_confirmar_selfie_salida, pattern="^(confirmar_selfie_salida|repetir_selfie_salida)$"))
     app.add_handler(CallbackQueryHandler(handle_confirmar_tipo, pattern="^(confirmar_tipo|corregir_tipo)$"))
