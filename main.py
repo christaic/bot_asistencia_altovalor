@@ -486,33 +486,82 @@ async def handle_tipo_cuadrilla(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     if not query or not es_chat_privado(update):
         return
-    await query.answer()
+
     chat_id = query.message.chat.id
     ud = user_data.setdefault(chat_id, {})
     data = query.data
 
+    try:
+        await query.answer()
+    except Exception:
+        pass
+
     if data not in ("tipo_disp", "tipo_reg"):
         return
 
-    tipo = "Disponibilidad" if data == "tipo_disp" else "Regular"
-    ssid = ud.get("spreadsheet_id")
-    row = ud.get("row")
+    # Guarda selección provisional (sin escribir aún en el Sheet)
+    seleccion = "Disponibilidad" if data == "tipo_disp" else "Regular"
+    ud["tipo_seleccionado"] = seleccion
+    ud["paso"] = "confirmar_tipo"
 
-    if not ssid or not row:
-        ssid = ensure_global_spreadsheet()
-        ensure_sheet_and_headers(ssid)
-        base = {"CUADRILLA": ud.get("cuadrilla", ""), "TIPO DE CUADRILLA": ""}
-        row = append_base_row(ssid, base)
-        ud["spreadsheet_id"] = ssid
-        ud["row"] = row
-
-    gs_set_by_header(ssid, row, "TIPO DE CUADRILLA", tipo)
-
-    ud["paso"] = 1
+    k = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Confirmar tipo", callback_data="confirmar_tipo")],
+        [InlineKeyboardButton("✏️ Cambiar tipo", callback_data="corregir_tipo")],
+    ])
     await query.edit_message_text(
-        f"Tipo seleccionado: *{tipo}*\n\n📸 Envía la *selfie de la cuadrilla (inicio)*.",
-        parse_mode="Markdown"
+        f"Seleccionaste: *{seleccion}*.\n\n¿Es correcto?",
+        parse_mode="Markdown",
+        reply_markup=k
     )
+# ====================== CORREGIR TIPO O CONFIRMAR ===========
+
+async def handle_confirmar_tipo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query or not es_chat_privado(update):
+        return
+
+    chat_id = query.message.chat.id
+    ud = user_data.setdefault(chat_id, {})
+    data = query.data
+
+    try:
+        await query.answer()
+    except Exception:
+        pass
+
+    if ud.get("paso") != "confirmar_tipo":
+        return
+
+    if data == "corregir_tipo":
+        # Volver a elegir
+        k = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🟢 Disponibilidad", callback_data="tipo_disp")],
+            [InlineKeyboardButton("⚪ Regular", callback_data="tipo_reg")],
+        ])
+        await query.edit_message_text("Selecciona el *tipo de cuadrilla*:", parse_mode="Markdown", reply_markup=k)
+        return
+
+    if data == "confirmar_tipo":
+        ssid = ud.get("spreadsheet_id")
+        row  = ud.get("row")
+        if not ssid or not row:
+            await query.edit_message_text("❌ No hay registro activo. Usa /ingreso para iniciar.")
+            return
+
+        tipo = ud.get("tipo_seleccionado", "")
+        if not tipo:
+            await query.edit_message_text("⚠️ No encontré la selección. Vuelve a elegir el tipo.")
+            return
+
+        # Escribe en Sheet y avanza a pedir selfie de inicio
+        gs_set_cell(ssid, row, "TIPO DE CUADRILLA", tipo)
+        ud["tipo"] = tipo
+        ud["paso"] = "esperando_selfie_inicio"
+
+        await query.edit_message_text(
+            f"Tipo confirmado: *{tipo}*.\n\n📸 Envía la *selfie de la cuadrilla (inicio)*.",
+            parse_mode="Markdown"
+        )
 
 # ================== FOTO INICIO + HORA INGRESO ==================
 
@@ -585,42 +634,49 @@ async def foto_ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ================== UBICACIÓN INICIO / SALIDA ==================
 async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not es_chat_privado(update):
-        return
-    chat_id = update.effective_chat.id
-    ud = user_data.get(chat_id) or {}
-    if not update.message.location:
+    # Solo chat privado y mensajes con location
+    if not es_chat_privado(update) or not update.message or not update.message.location:
         return
 
+    chat_id = update.effective_chat.id
+    ud = user_data.setdefault(chat_id, {})
     ssid, row = ud.get("spreadsheet_id"), ud.get("row")
     if not ssid or not row:
         return
 
-    lat = update.message.location.latitude
-    lng = update.message.location.longitude
+    loc = update.message.location
+    lat, lon = loc.latitude, loc.longitude
+    is_live = bool(getattr(loc, "live_period", None))
 
-    if ud.get("paso") == 2:
-        gs_set_by_header(ssid, row, "LATITUD", f"{lat:.6f}")
-        gs_set_by_header(ssid, row, "LONGITUD", f"{lng:.6f}")
-        ud["paso"] = "en_jornada"
+    # Exigir live-location (no aceptar ubicación estática)
+    if not is_live:
+        await update.message.reply_text(
+            "⚠️ Por favor, comparte tu *ubicación en tiempo real*.\n\n"
+            "Toca el clip ➜ Ubicación ➜ **Compartir ubicación en tiempo real**."
+        )
+        return
+
+    # Ubicación de INICIO
+    if ud.get("paso") in ("esperando_live_inicio", 2):
+        gs_set_cell(ssid, row, "LATITUD", f"{lat:.6f}")
+        gs_set_cell(ssid, row, "LONGITUD", f"{lon:.6f}")
+        ud["paso"] = "en_jornada"   # ya puede usar /breakout y /breakin
+        user_data[chat_id] = ud
         await update.message.reply_text(
             "✅ Ubicación de inicio registrada.\n\n"
-            "Usa /breakout y /breakin durante el día. "
-            "Cuando termines, usa /salida."
+            "Usa /breakout y /breakin durante el día. Para terminar, usa /salida."
         )
+        return
 
-    elif ud.get("paso") == "ubicacion_salida":
-        gs_set_by_header(ssid, row, "LATITUD SALIDA", f"{lat:.6f}")
-        gs_set_by_header(ssid, row, "LONGITUD SALIDA", f"{lng:.6f}")
+    # Ubicación de SALIDA
+    if ud.get("paso") == "esperando_live_salida":
+        gs_set_cell(ssid, row, "LATITUD SALIDA", f"{lat:.6f}")
+        gs_set_cell(ssid, row, "LONGITUD SALIDA", f"{lon:.6f}")
         ud["paso"] = None
-        await update.message.reply_text(
-            "🫡 ¡Registro finalizado!\n\n"
-            "Gracias por tu apoyo hoy.\n"
-            "¡Jornada finalizada! 🙌",
-            parse_mode="Markdown"
-        )
+        user_data[chat_id] = ud
+        await update.message.reply_text("✅ Ubicación de salida registrada. ¡Jornada finalizada! 🙌")
+        return
 
-    user_data[chat_id] = ud
 
 # ================== BREAK OUT / BREAK IN ==================
 async def breakout(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -738,17 +794,155 @@ async def selfie_salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ================== ROUTER DE FOTOS ==================
+
 async def manejar_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not es_chat_privado(update):
+    try:
+        chat_id = update.effective_chat.id
+        paso = user_data.get(chat_id, {}).get("paso")
+
+        if update.message.reply_to_message:
+            if update.message.reply_to_message.message_id == user_data.get(chat_id, {}).get("msg_id_motivador"):
+                return
+
+        # Selfie de INICIO -> capturamos y pedimos confirmación
+        if paso == "esperando_selfie_inicio":
+            photo = update.message.photo[-1]
+            ud = user_data.setdefault(chat_id, {})
+            ud["pending_selfie_inicio_file_id"] = photo.file_id
+            ud["paso"] = "confirmar_selfie_inicio"
+            k = InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Selfie correcta (subir a Drive)", callback_data="confirmar_selfie_inicio")],
+                [InlineKeyboardButton("🔄 Repetir selfie", callback_data="repetir_selfie_inicio")],
+            ])
+            await update.message.reply_text("¿Usamos esta foto de inicio?", reply_markup=k)
+            return
+
+        # Selfie de SALIDA -> capturamos y pedimos confirmación
+        if paso == "esperando_selfie_salida":
+            photo = update.message.photo[-1]
+            ud = user_data.setdefault(chat_id, {})
+            ud["pending_selfie_salida_file_id"] = photo.file_id
+            ud["paso"] = "confirmar_selfie_salida"
+            k = InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Selfie correcta (subir a Drive)", callback_data="confirmar_selfie_salida")],
+                [InlineKeyboardButton("🔄 Repetir selfie", callback_data="repetir_selfie_salida")],
+            ])
+            await update.message.reply_text("¿Usamos esta foto de salida?", reply_markup=k)
+            return
+
+        # Flujo viejo (por si llega foto fuera de lugar)
+        if paso == 1:
+            await foto_ingreso(update, context)  # si aún usas este camino
+        elif paso == 2:
+            await foto_ats(update, context)      # si aún usas ATS en tu versión
+        elif paso == "selfie_salida":
+            await selfie_salida(update, context)
+        else:
+            await update.message.reply_text("⚠️ No es momento de enviar fotos.\n\nUsa /ingreso para comenzar.")
+    except Exception as e:
+        logger.error(f"[ERROR] manejar_fotos: {e}")
+
+
+async def _upload_selfie_from_file_id(bot, file_id: str, filename: str) -> str:
+    buff = io.BytesIO()
+    tg_file = await bot.get_file(file_id)
+    await tg_file.download_to_memory(out=buff)  # PTB v20
+    link = upload_image_and_get_link(buff, filename)
+    return link
+
+# ============= CONFIRMAR SELFIE INICIO & SALIDA =========
+
+async def handle_confirmar_selfie_inicio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query or not es_chat_privado(update):
         return
-    chat_id = update.effective_chat.id
-    paso = user_data.get(chat_id, {}).get("paso")
-    if paso == 1:
-        await foto_ingreso(update, context)
-    elif paso == "selfie_salida":
-        await selfie_salida(update, context)
-    else:
-        await update.message.reply_text("⚠️ No es momento de enviar fotos. Usa /ingreso para comenzar.")
+    chat_id = query.message.chat.id
+    ud = user_data.setdefault(chat_id, {})
+    try:
+        await query.answer()
+    except Exception:
+        pass
+
+    if query.data == "repetir_selfie_inicio":
+        ud["pending_selfie_inicio_file_id"] = None
+        ud["paso"] = "esperando_selfie_inicio"
+        await query.edit_message_text("🔄 Envía nuevamente tu *selfie de inicio*.", parse_mode="Markdown")
+        return
+
+    if query.data == "confirmar_selfie_inicio":
+        ssid, row = ud.get("spreadsheet_id"), ud.get("row")
+        fid = ud.get("pending_selfie_inicio_file_id")
+        if not (ssid and row and fid):
+            await query.edit_message_text("❌ Falta selfie o registro. Usa /ingreso de nuevo.")
+            return
+        try:
+            filename = f"selfie_inicio_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
+            link = await _upload_selfie_from_file_id(context.bot, fid, filename)
+            gs_set_cell(ssid, row, "SELFIE CUADRILLA", link)
+
+            # Hora de ingreso
+            hora = datetime.now(LIMA_TZ).strftime("%H:%M")
+            update_single_cell(ssid, SHEET_TITLE, COL["HORA INGRESO"], row, hora)
+            ud["hora_ingreso"] = hora
+
+            # Pedir ubicación en tiempo real
+            ud["paso"] = "esperando_live_inicio"
+            ud["pending_selfie_inicio_file_id"] = None
+
+            await query.edit_message_text(
+                f"✅ Selfie subida. ⏱️ Hora ingreso: *{hora}*.\n\n"
+                "📍 Envía tu *ubicación en tiempo real* (en Telegram elige “Compartir ubicación en tiempo real”).",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.error(f"[ERROR] confirm_selfie_inicio upload: {e}")
+            await query.edit_message_text("⚠️ No pude subir la foto a Drive. Reintenta enviando la selfie.")
+
+
+async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query or not es_chat_privado(update):
+        return
+    chat_id = query.message.chat.id
+    ud = user_data.setdefault(chat_id, {})
+    try:
+        await query.answer()
+    except Exception:
+        pass
+
+    if query.data == "repetir_selfie_salida":
+        ud["pending_selfie_salida_file_id"] = None
+        ud["paso"] = "esperando_selfie_salida"
+        await query.edit_message_text("🔄 Envía nuevamente tu *selfie de salida*.", parse_mode="Markdown")
+        return
+
+    if query.data == "confirmar_selfie_salida":
+        ssid, row = ud.get("spreadsheet_id"), ud.get("row")
+        fid = ud.get("pending_selfie_salida_file_id")
+        if not (ssid and row and fid):
+            await query.edit_message_text("❌ Falta selfie o registro. Usa /salida para iniciar cierre.")
+            return
+        try:
+            filename = f"selfie_salida_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
+            link = await _upload_selfie_from_file_id(context.bot, fid, filename)
+            gs_set_cell(ssid, row, "SELFIE SALIDA", link)
+
+            # Hora de salida
+            hora = datetime.now(LIMA_TZ).strftime("%H:%M")
+            update_single_cell(ssid, SHEET_TITLE, COL["HORA SALIDA"], row, hora)
+
+            ud["paso"] = "esperando_live_salida"
+            ud["pending_selfie_salida_file_id"] = None
+
+            await query.edit_message_text(
+                f"✅ Selfie subida. ⏱️ Hora salida: *{hora}*.\n\n"
+                "📍 Comparte tu *ubicación en tiempo real* para finalizar.",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.error(f"[ERROR] confirm_selfie_salida upload: {e}")
+            await query.edit_message_text("⚠️ No pude subir la foto a Drive. Reenvíala, por favor.")
+
 
 # ================== CALLBACKS (placeholder) ==================
 async def manejar_repeticiones(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -775,6 +969,9 @@ def main():
     app.add_handler(MessageHandler(filters.LOCATION, manejar_ubicacion))
 
     # --- CALLBACKS REALES ---
+    app.add_handler(CallbackQueryHandler(handle_confirmar_selfie_inicio, pattern="^(confirmar_selfie_inicio|repetir_selfie_inicio)$"))
+    app.add_handler(CallbackQueryHandler(handle_confirmar_selfie_salida, pattern="^(confirmar_selfie_salida|repetir_selfie_salida)$"))
+    app.add_handler(CallbackQueryHandler(handle_confirmar_tipo, pattern="^(confirmar_tipo|corregir_tipo)$"))
     app.add_handler(CallbackQueryHandler(handle_nombre_cuadrilla, pattern="^(confirmar_nombre|corregir_nombre)$"))
     app.add_handler(CallbackQueryHandler(handle_tipo_cuadrilla, pattern="^tipo_(disp|reg)$"))
     app.add_handler(CallbackQueryHandler(manejar_repeticiones, pattern="^repetir_"))
