@@ -24,14 +24,20 @@ LIMA_TZ = timezone("America/Lima")
 
 # ================== CONFIGURACIÓN ==================
 BOT_TOKEN = os.getenv("BOT_TOKEN")  # Token del bot
-NOMBRE_CARPETA_DRIVE = "ASISTENCIA_SGA_ALTOVALOR"  # Carpeta principal en la unidad compartida
-DRIVE_ID = "0AN8pG_lPt1dtUk9PVA"        # ID de la unidad compartida (Shared Drive)
-
-# --- ÚNICO SPREADSHEET GLOBAL ---
+NOMBRE_CARPETA_DRIVE = "ASISTENCIA_SGA_ALTOVALOR"
+DRIVE_ID = "0AN8pG_lPt1dtUk9PVA"
 GLOBAL_SHEET_NAME = "ASISTENCIA_CUADRILLAS_DISP_ALTO_VALOR"
 
 # Carga de credenciales desde variable de entorno
-CREDENTIALS_JSON = os.environ["GOOGLE_CREDENTIALS_JSON"]
+CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+
+# 🔎 Verificación temprana de variables críticas
+if not BOT_TOKEN:
+    raise RuntimeError("❌ BOT_TOKEN no definido en Render")
+
+if not CREDENTIALS_JSON:
+    raise RuntimeError("❌ GOOGLE_CREDENTIALS_JSON no definido en Render")
+
 
 # ================== LOGGING ==================
 logging.basicConfig(
