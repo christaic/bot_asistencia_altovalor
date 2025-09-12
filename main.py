@@ -5,6 +5,7 @@ import io
 import json
 import logging
 from datetime import datetime
+from datetime import date
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -19,6 +20,19 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from pytz import timezone
 
+# Control de registros diarios (chat_id -> fecha último registro finalizado)
+
+registro_diario = {}
+
+def ya_registro_hoy(chat_id: int) -> bool:
+    """Verifica si el usuario ya completó un registro hoy"""
+    return registro_diario.get(chat_id) == date.today().isoformat()
+
+def marcar_registro_completo(chat_id: int):
+    """Marca que el usuario completó su registro hoy"""
+    registro_diario[chat_id] = date.today().isoformat()
+
+
 # ================== ZONA HORARIA ==================
 LIMA_TZ = timezone("America/Lima")
 
@@ -27,6 +41,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")  # Token del bot
 NOMBRE_CARPETA_DRIVE = "ASISTENCIA_SGA_ALTOVALOR"
 DRIVE_ID = "0AN8pG_lPt1dtUk9PVA"
 GLOBAL_SHEET_NAME = "ASISTENCIA_CUADRILLAS_DISP_ALTO_VALOR"
+USUARIOS_TEST = {7175478712}
 
 # Carga de credenciales desde variable de entorno
 CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS_JSON")
@@ -385,12 +400,22 @@ async def ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not es_chat_privado(update):
         return
     chat_id = update.effective_chat.id
+
+    # ✅ Validar si ya completó un registro hoy y si no está en la lista de prueba, aplica restricción #
+    if chat_id not in USUARIOS_TEST and ya_registro_hoy(chat_id):
+        await update.message.reply_text(
+            "⚠️ Ya realizaste un registro completo hoy. Solo puedes hacer uno por día. ✅"
+        )
+        return
+
+    # Si no es usuario de prueba o no tiene registro, arranca el flujo
     user_data[chat_id] = {"paso": 0}  # reinicia flujo
     await update.message.reply_text(
         "✍️ Escribe el *nombre de tu cuadrilla*.\n\n"
         "Ejemplo:\nT1: Juan Pérez\nT2: José Flores",
         parse_mode="Markdown"
     )
+
 
 # ================== PASO 0: NOMBRE CUADRILLA ==================
 async def nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -681,6 +706,11 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
         update_single_cell(ssid, SHEET_TITLE, COL["LONGITUD SALIDA"], row, f"{lon:.6f}")
         ud["paso"] = None
         user_data[chat_id] = ud
+
+        # ✅ Marcar registro como completo (excepto usuarios de prueba)
+        if chat_id not in USUARIOS_TEST:
+            marcar_registro_completo(chat_id)
+        
         await update.message.reply_text("✅ Ubicación de salida registrada. ¡Jornada finalizada! 🙌")
         return
 
@@ -691,32 +721,59 @@ async def breakout(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     chat_id = update.effective_chat.id
     ud = user_data.setdefault(chat_id, {})
-    ssid = ud.get("spreadsheet_id")
-    row = ud.get("row")
+    ssid, row = ud.get("spreadsheet_id"), ud.get("row")
 
+    # Validaciones
     if not ssid or not row:
         await update.message.reply_text("⚠️ No hay jornada activa. Usa /ingreso para iniciar.")
         return
 
+    # Solo se permite breakout si ya completó ingreso
+    if ud.get("paso") != "en_jornada":
+        await update.message.reply_text("⚠️ No puedes registrar Break Out en este momento.\n\n"
+                                        "Primero completa tu ingreso (selfie + ubicación).")
+        return
+
+    # Registrar hora Break Out
     hora = datetime.now(LIMA_TZ).strftime("%H:%M")
     set_cell_value(ssid, SHEET_TITLE, f"{COL['HORA BREAK OUT']}{row}", hora)
-    await update.message.reply_text(f"🍽️ Break Out registrado a las {hora}.")
+
+    # Cambiar estado → ahora debe hacer Break In
+    ud["paso"] = "esperando_breakin"
+    user_data[chat_id] = ud
+
+    await update.message.reply_text(f"🍽️ Break Out registrado a las {hora}.\n\n"
+                                    "Cuando regreses, usa /breakin.")
+
 
 async def breakin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not es_chat_privado(update):
         return
     chat_id = update.effective_chat.id
     ud = user_data.setdefault(chat_id, {})
-    ssid = ud.get("spreadsheet_id")
-    row = ud.get("row")
+    ssid, row = ud.get("spreadsheet_id"), ud.get("row")
 
     if not ssid or not row:
         await update.message.reply_text("⚠️ No hay jornada activa. Usa /ingreso para iniciar.")
         return
 
+    # Solo se permite breakin si ya hizo breakout
+    if ud.get("paso") != "esperando_breakin":
+        await update.message.reply_text("⚠️ No puedes registrar Break In en este momento.\n\n"
+                                        "Primero debes registrar tu Break Out.")
+        return
+
+    # Registrar hora Break In
     hora = datetime.now(LIMA_TZ).strftime("%H:%M")
     set_cell_value(ssid, SHEET_TITLE, f"{COL['HORA BREAK IN']}{row}", hora)
-    await update.message.reply_text(f"🚶 Regreso de Break registrado a las {hora}.")
+
+    # Cambiar estado → ya puede ir a salida
+    ud["paso"] = "en_jornada_post_break"
+    user_data[chat_id] = ud
+
+    await update.message.reply_text(f"🚶 Regreso de Break registrado a las {hora}.\n\n"
+                                    "Cuando termines tu jornada, usa /salida.")
+
 
 # ================== SALIDA ==================
 async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -724,17 +781,32 @@ async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     chat_id = update.effective_chat.id
     ud = user_data.setdefault(chat_id, {})
-    ssid = ud.get("spreadsheet_id")
-    row = ud.get("row")
+    ssid, row = ud.get("spreadsheet_id"), ud.get("row")
 
+    # Validación: debe existir jornada activa
     if not ssid or not row:
         await update.message.reply_text("⚠️ No hay jornada activa. Usa /ingreso para iniciar.")
         return
 
-    ud["paso"] = "selfie_salida"
-    await update.message.reply_text("📸 Envía tu *selfie de salida* para finalizar.", parse_mode="Markdown")
+    # Validación de flujo: solo se permite salida si ya completó el break
+    if ud.get("paso") != "en_jornada_post_break":
+        await update.message.reply_text(
+            "⚠️ No puedes registrar salida todavía.\n\n"
+            "Primero debes:\n"
+            "1️⃣ Hacer Break Out (/breakout)\n"
+            "2️⃣ Hacer Break In (/breakin)\n"
+            "y luego podrás finalizar con /salida."
+        )
+        return
 
+    # Ahora sí pedimos la selfie de salida
+    ud["paso"] = "esperando_selfie_salida"
+    user_data[chat_id] = ud
 
+    await update.message.reply_text(
+        "📸 Envía tu *selfie de salida* para finalizar la jornada.",
+        parse_mode="Markdown"
+    )
 
 async def selfie_salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
