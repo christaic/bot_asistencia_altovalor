@@ -314,9 +314,23 @@ def gs_set_by_header(spreadsheet_id: str, row: int, header: str, value):
 user_data = {}  # por chat_id (privado)
 
 # ================== SOLO PRIVADO ==================
+
 def es_chat_privado(update: Update) -> bool:
-    msg = update.message or getattr(update, "callback_query", None)
-    chat = (msg.chat if hasattr(msg, "chat") else None) if msg else None
+    """
+    True si el update proviene de un chat privado.
+    Soporta mensajes y callbacks.
+    """
+    chat = None
+    # Mensaje normal
+    if getattr(update, "message", None):
+        chat = update.message.chat
+    # Callback (botones inline)
+    elif getattr(update, "callback_query", None) and update.callback_query.message:
+        chat = update.callback_query.message.chat
+    # Mensaje editado (por si acaso)
+    elif getattr(update, "edited_message", None):
+        chat = update.edited_message.chat
+
     return bool(chat and chat.type == "private")
 
 # ================== BOT INFO ==================
