@@ -412,8 +412,8 @@ async def validar_flujo(update: Update, chat_id: int) -> bool:
     
     if paso == "esperando_live_salida":
         if not update.message.location or not getattr(update.message.location, "live_period", None):
-        await update.message.reply_text("📍 Aquí solo debes compartir tu *ubicación final en tiempo real*. 🔴")
-        return False
+            await update.message.reply_text("📍 Aquí solo debes compartir tu *ubicación final en tiempo real*. 🔴")
+            return False
 
     # al final de validar_flujo
     
