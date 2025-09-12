@@ -65,20 +65,24 @@ HEADERS = [
 
 COL = {h: chr(65+i) for i, h in enumerate(HEADERS)}
 
-# ---------------- SPREADSHEET ÚNICO ----------------
+# ---------------- SPREADSHEET  ----------------
 def get_or_create_main_spreadsheet() -> str:
-    q = f"name='{SPREADSHEET_NAME}' and '{MAIN_FOLDER_ID}' in parents and trashed=false"
-    results = drive_service.files().list(
-        q=q,
-        fields="files(id, name)",
-        supportsAllDrives=True,
-        includeItemsFromAllDrives=True
-    ).execute()
-    files = results.get("files", [])
-    if files:
-        return files[0]["id"]
+    try:
+        q = f"name='{SPREADSHEET_NAME}' and '{MAIN_FOLDER_ID}' in parents and trashed=false"
+        results = drive_service.files().list(
+            q=q,
+            fields="files(id, name)",
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True
+        ).execute()
+        files = results.get("files", [])
+        if files:
+            logger.info(f"✅ Spreadsheet encontrado: {files[0]['name']} ({files[0]['id']})")
+            return files[0]["id"]
+    except Exception as e:
+        logger.error(f"❌ Error buscando archivo en Drive: {e}")
 
-    # Crear si no existe
+    logger.info("📄 No existe spreadsheet, creando uno nuevo en la carpeta...")
     meta = {
         "name": SPREADSHEET_NAME,
         "mimeType": SHEET_MIME,
@@ -91,7 +95,6 @@ def get_or_create_main_spreadsheet() -> str:
     ).execute()
     ssid = created["id"]
 
-    # Crear hoja y headers
     sheets_service.spreadsheets().values().update(
         spreadsheetId=ssid,
         range=f"{SHEET_TITLE}!A1:K1",
@@ -99,6 +102,12 @@ def get_or_create_main_spreadsheet() -> str:
         body={"values": [HEADERS]}
     ).execute()
     return ssid
+
+user_data = {}
+SPREADSHEET_ID = get_or_create_main_spreadsheet()
+
+logger.info(f"📂 Usando carpeta en Drive: {MAIN_FOLDER_ID}")
+logger.info(f"📊 Spreadsheet en uso: {SPREADSHEET_ID}")
 
 # ---------------- SHEET HELPERS ----------------
 def append_row(ssid: str, data: dict) -> int:
@@ -280,3 +289,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
