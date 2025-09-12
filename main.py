@@ -70,36 +70,37 @@ COL = {h: chr(65+i) for i, h in enumerate(HEADERS)}
 # ---------------- SPREADSHEET ----------------
 
 def get_or_create_main_spreadsheet() -> str:
+    folder_id = MAIN_FOLDER_ID  # usar la global como valor inicial
+
     try:
         # Verificar si la carpeta es accesible
         try:
             folder_check = drive_service.files().get(
-                fileId=MAIN_FOLDER_ID,
+                fileId=folder_id,
                 fields="id, name",
                 supportsAllDrives=True
             ).execute()
             logger.info(f"📂 Carpeta encontrada: {folder_check['name']} ({folder_check['id']})")
         except Exception as e:
-            logger.error(f"❌ No se pudo acceder a la carpeta con ID {MAIN_FOLDER_ID}: {e}")
+            logger.error(f"❌ No se pudo acceder a la carpeta con ID {folder_id}: {e}")
             logger.info("📂 Creando carpeta nueva en la unidad compartida...")
 
             meta_folder = {
                 "name": NOMBRE_CARPETA_DRIVE,
                 "mimeType": "application/vnd.google-apps.folder",
-                "parents": [],
-                "driveId": DRIVE_ID
+                "parents": [],  # raíz de la unidad compartida
             }
             new_folder = drive_service.files().create(
                 body=meta_folder,
                 fields="id",
                 supportsAllDrives=True
             ).execute()
-            MAIN_FOLDER_ID = new_folder["id"]
-            logger.info(f"✅ Carpeta creada: {NOMBRE_CARPETA_DRIVE} ({MAIN_FOLDER_ID})")
+            folder_id = new_folder["id"]
+            logger.info(f"✅ Carpeta creada: {NOMBRE_CARPETA_DRIVE} ({folder_id})")
 
         # Buscar el spreadsheet dentro de la carpeta
         results = drive_service.files().list(
-            q=f"name='{SPREADSHEET_NAME}' and '{MAIN_FOLDER_ID}' in parents and trashed=false",
+            q=f"name='{SPREADSHEET_NAME}' and '{folder_id}' in parents and trashed=false",
             corpora="drive",
             driveId=DRIVE_ID,
             fields="files(id, name)",
@@ -116,7 +117,7 @@ def get_or_create_main_spreadsheet() -> str:
         meta = {
             "name": SPREADSHEET_NAME,
             "mimeType": SHEET_MIME,
-            "parents": [MAIN_FOLDER_ID],
+            "parents": [folder_id],
         }
         created = drive_service.files().create(
             body=meta,
@@ -140,6 +141,7 @@ def get_or_create_main_spreadsheet() -> str:
     except Exception as e:
         logger.error(f"❌ Error en get_or_create_main_spreadsheet: {e}")
         raise
+
 
 # ---------------- SHEET HELPERS ----------------
 def append_row(ssid: str, data: dict) -> int:
