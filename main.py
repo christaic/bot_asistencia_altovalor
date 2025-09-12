@@ -554,7 +554,8 @@ async def handle_confirmar_tipo(update: Update, context: ContextTypes.DEFAULT_TY
             return
 
         # Escribe en Sheet y avanza a pedir selfie de inicio
-        gs_set_cell(ssid, row, "TIPO DE CUADRILLA", tipo)
+        
+        update_single_cell(ssid, SHEET_TITLE, COL["TIPO DE CUADRILLA"], row, tipo)
         ud["tipo"] = tipo
         ud["paso"] = "esperando_selfie_inicio"
 
@@ -658,8 +659,8 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Ubicación de INICIO
     if ud.get("paso") in ("esperando_live_inicio", 2):
-        gs_set_cell(ssid, row, "LATITUD", f"{lat:.6f}")
-        gs_set_cell(ssid, row, "LONGITUD", f"{lon:.6f}")
+        update_single_cell(ssid, SHEET_TITLE, COL["LATITUD"], row, f"{lat:.6f}")
+        update_single_cell(ssid, SHEET_TITLE, COL["LONGITUD"], row, f"{lon:.6f}")
         ud["paso"] = "en_jornada"   # ya puede usar /breakout y /breakin
         user_data[chat_id] = ud
         await update.message.reply_text(
@@ -670,8 +671,8 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Ubicación de SALIDA
     if ud.get("paso") == "esperando_live_salida":
-        gs_set_cell(ssid, row, "LATITUD SALIDA", f"{lat:.6f}")
-        gs_set_cell(ssid, row, "LONGITUD SALIDA", f"{lon:.6f}")
+        update_single_cell(ssid, SHEET_TITLE, COL["LATITUD SALIDA"], row, f"{lat:.6f}")
+        update_single_cell(ssid, SHEET_TITLE, COL["LONGITUD SALIDA"], row, f"{lon:.6f}")
         ud["paso"] = None
         user_data[chat_id] = ud
         await update.message.reply_text("✅ Ubicación de salida registrada. ¡Jornada finalizada! 🙌")
@@ -878,7 +879,7 @@ async def handle_confirmar_selfie_inicio(update: Update, context: ContextTypes.D
         try:
             filename = f"selfie_inicio_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
             link = await _upload_selfie_from_file_id(context.bot, fid, filename)
-            gs_set_cell(ssid, row, "SELFIE CUADRILLA", link)
+            update_single_cell(ssid, SHEET_TITLE, COL["SELFIE CUADRILLA"], row, link)
 
             # Hora de ingreso
             hora = datetime.now(LIMA_TZ).strftime("%H:%M")
@@ -925,7 +926,7 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
         try:
             filename = f"selfie_salida_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
             link = await _upload_selfie_from_file_id(context.bot, fid, filename)
-            gs_set_cell(ssid, row, "SELFIE SALIDA", link)
+            update_single_cell(ssid, SHEET_TITLE, COL["SELFIE SALIDA"], row, link)
 
             # Hora de salida
             hora = datetime.now(LIMA_TZ).strftime("%H:%M")
@@ -984,6 +985,3 @@ def main():
 
     print("🚀 Bot de Asistencia (privado) en ejecución...")
     app.run_polling()
-
-if __name__ == "__main__":
-    main()
