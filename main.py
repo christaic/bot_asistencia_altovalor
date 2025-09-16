@@ -448,8 +448,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
 
     await update.message.reply_text(
-        "👋 ¡Hola! Bienvenido al bot SGA de asistencia.\n\n" + comandos,
-        parse_mode="Markdown",
+        "👋 ¡Hola! Bienvenido al bot SGA de asistencia.<br><br>" + comandos,
+        parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -474,7 +474,7 @@ async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ⚠️ El flujo es estricto, no puedes saltarte pasos.
 """
 
-    await update.message.reply_text(texto, parse_mode="Markdown")
+    await update.message.reply_text(texto, parse_mode="HTML")
 
 
 async def ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -492,10 +492,10 @@ async def ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Si no es usuario de prueba o no tiene registro, arranca el flujo
     user_data[chat_id] = {"paso": 0}  # reinicia flujo
     await update.message.reply_text(
-        "✍️ Escribe el *nombre de tu cuadrilla*.\n\n"
-        "✏️ Recuerda ingresar el nombre de tu cuadrilla de acuerdo a como se visualiza en *PHOENIX*.\n\n"
-        "Ejemplo:\n\n *D 1 WIN SGA CHRISTOPHER INGA CONTRERAS*\n *D 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA*",
-        parse_mode="Markdown"
+        "✍️ Escribe el <b>nombre de tu cuadrilla</b>.<br><br>"
+        "✏️ Recuerda ingresarlo como aparece en <b>PHOENIX</b>.<br><br>"
+        "Ejemplo:<br><br> <b>D 1 WIN SGA CHRISTOPHER INGA CONTRERAS</b><br> <b>D 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA</b>",
+        parse_mode="HTML"
     )
 
 
@@ -522,8 +522,8 @@ async def nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("✏️ Corregir ", callback_data="corregir_nombre")],
     ]
     await update.message.reply_text(
-        f"¿Has ingresado correctamente el nombre de tu cuadrilla? 🤔🤔\n\n*{ud['cuadrilla']}*\n\n¿Es correcto?",
-        parse_mode="Markdown",
+        f"¿Has ingresado correctamente el nombre de tu cuadrilla? 🤔🤔<br><br><b>{ud['cuadrilla']}</b><br><br>¿Es correcto?",
+        parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
 
@@ -543,10 +543,9 @@ async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_
             ud["paso"] = 0
             ud["cuadrilla"] = ""
             await query.edit_message_text(
-                "✍️ *Escribe el nombre de tu cuadrilla nuevamente.*",
-                parse_mode="Markdown"
+                "✍️ <b>Escribe el nombre de tu cuadrilla nuevamente.</b>",
+                parse_mode="HTML"
             )
-            return
 
         if query.data == "confirmar_nombre":
             if not ud.get("cuadrilla"):
@@ -628,8 +627,8 @@ async def handle_tipo_cuadrilla(update: Update, context: ContextTypes.DEFAULT_TY
         [InlineKeyboardButton("✏️ Corregir", callback_data="corregir_tipo")],
     ])
     await query.edit_message_text(
-        f"Seleccionaste: *{seleccion}*.\n\n¿Es correcto?",
-        parse_mode="Markdown",
+        f"Seleccionaste: <b>{seleccion}</b>.<br><br>¿Es correcto?",
+        parse_mode="HTML",
         reply_markup=k
     )
 # ====================== CORREGIR TIPO O CONFIRMAR ===========
@@ -679,8 +678,8 @@ async def handle_confirmar_tipo(update: Update, context: ContextTypes.DEFAULT_TY
         ud["paso"] = "esperando_selfie_inicio"
 
         await query.edit_message_text(
-            f"Tipificación de cuadrilla confirmada: *{tipo}*.\n\n📸 Envía tu foto de *Inicio con tus EPPs completos*.",
-            parse_mode="Markdown"
+            f"Tipificación de cuadrilla confirmada: <b>{tipo}</b>.<br><br>📸 Envía tu foto de <b>Inicio con tus EPPs completos</b>.",
+            parse_mode="HTML"
         )
 
 # ================== FOTO INICIO + HORA INGRESO ==================
@@ -746,9 +745,9 @@ async def foto_ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data[chat_id] = ud
 
     await update.message.reply_text(
-        f"⏱️ Hora de ingreso registrada: *{hora}*.\n\n"
-        "📍 Ahora comparte tu *ubicación actual* (clip ➜ Ubicación).",
-        parse_mode="Markdown",
+        f"⏱️ Hora de ingreso registrada: <b>{hora}</b>.<br><br>"
+        "📍 Ahora comparte tu <b>ubicación actual</b> (clip ➜ Ubicación).",
+        parse_mode="HTML"
     )
 
 
@@ -803,8 +802,11 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if chat_id not in USUARIOS_TEST:
             marcar_registro_completo(chat_id)
         
-        await update.message.reply_text("✅ Ubicación de salida registrada.""\n\n ¡Jornada finalizada!🏠")
-        return
+        await update.message.reply_text(
+            "✅ Ubicación de inicio registrada.<br><br>"
+            "<b>Recuerda que para concluir tu jornada debes usar /salida.</b>",
+            parse_mode="HTML"
+        )
 
 
 # ================== BREAK OUT / BREAK IN ==================
@@ -876,7 +878,9 @@ async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     ud["paso"] = "esperando_selfie_salida"
-    await update.message.reply_text("📸 Envía tu *selfie de salida* para finalizar jornada.", parse_mode="Markdown")
+    await update.message.reply_text("📸 Envía tu <b>selfie de salida</b> para finalizar jornada.", parse_mode="HTML")
+
+
 
 
 async def selfie_salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -937,9 +941,9 @@ async def selfie_salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data[chat_id] = ud
 
     await update.message.reply_text(
-        f"⏱️ Hora de salida registrada: *{hora}*.\n\n"
-        "📍 Comparte tu *ubicación actual* para finalizar.",
-        parse_mode="Markdown",
+        f"⏱️ Hora de salida registrada: <b>{hora}</b>.<br><br>"
+        "📍 Comparte tu <b>ubicación actual</b> para finalizar.",
+        parse_mode="HTML"
     )
 
 
@@ -1043,9 +1047,9 @@ async def handle_confirmar_selfie_inicio(update: Update, context: ContextTypes.D
             ud["pending_selfie_inicio_file_id"] = None
 
             await query.edit_message_text(
-                f"✅ Fotografía registrada. ⏱️ Hora de inicio: *{hora}*.\n\n"
-                "📍 Ahora envía tu *ubicación en tiempo real* \n\n(Elige “Compartir ubicación en tiempo real*”📍).",
-                parse_mode="Markdown"
+                f"✅ Fotografía registrada. ⏱️ Hora de inicio: <b>{hora}</b>.<br><br>"
+                "📍 Ahora envía tu <b>ubicación en tiempo real</b><br><br>(Elige “Compartir ubicación en tiempo real” 📍).",
+                parse_mode="HTML"
             )
         except Exception as e:
             logger.error(f"[ERROR] confirm_selfie_inicio upload: {e}")
@@ -1088,10 +1092,11 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
             ud["pending_selfie_salida_file_id"] = None
 
             await query.edit_message_text(
-                f"✅ Fotografía registrada. ⏱️ Hora de salida registrada: *{hora}*.\n\n"
-                "📍 Ahora envía tu *ubicación en tiempo real* \n\n(Elige “Compartir ubicación en tiempo real*”📍).",
-                parse_mode="Markdown"
+                f"✅ Fotografía registrada. ⏱️ Hora de salida registrada: <b>{hora}</b>.<br><br>"
+                "📍 Ahora envía tu <b>ubicación en tiempo real</b><br><br>(Elige “Compartir ubicación en tiempo real” 📍).",
+                parse_mode="HTML"
             )
+
         except Exception as e:
             logger.error(f"[ERROR] confirm_selfie_salida upload: {e}")
             await query.edit_message_text("⚠️ No pude subir la foto a Drive. Reenvíala, por favor.")
@@ -1108,10 +1113,11 @@ async def handle_ayuda_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
     await query.answer()
     await query.edit_message_text(
-        "⚠️⚠️ *¡Usa los comandos o botones para registrar tu asistencia paso a paso!* \n\n"
+        "⚠️⚠️ <b>¡Usa los comandos o botones para registrar tu asistencia paso a paso!</b><br><br>"
         "Comienza con /ingreso y sigue la secuencia para que tu asistencia se registre correctamente. ✅✅",
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
+
 
 # ================== MAIN ==================
 def main():
