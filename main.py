@@ -814,7 +814,7 @@ async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     ud["paso"] = "esperando_selfie_salida"
-    await update.message.reply_text("📸 Envía tu foto de <b>de Fin con tus EPPs completos</b>.", parse_mode="HTML")
+    await update.message.reply_text("📸 Envía tu foto de <b>fin de labores con tus EPPs completos</b>.\n Para finalizar tu jornada. 🏠", parse_mode="HTML")
 
 
 async def selfie_salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -905,7 +905,7 @@ async def manejar_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_selfie_inicio")],
                 [InlineKeyboardButton("🔄 Corregir", callback_data="repetir_selfie_inicio")],
             ])
-            await update.message.reply_text("¿Usamos esta foto para iniciar actividades?\n\n ⚠️ Importante: Despues de brindar la confirmación.\n ⏳ Debemos esperar como minimo 8 seg. para continuar.", reply_markup=k)
+            await update.message.reply_text("¿Usamos esta foto para iniciar actividades?\n\n ⚠️ Importante: Despues de brindar la confirmación.\n\n ⏳ Debemos esperar como minimo 8 seg. para continuar.", reply_markup=k)
             return
 
         # Selfie de SALIDA -> capturamos y pedimos confirmación
@@ -918,7 +918,7 @@ async def manejar_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_selfie_salida")],
                 [InlineKeyboardButton("🔄 Corregir", callback_data="repetir_selfie_salida")],
             ])
-            await update.message.reply_text("¿Usamos esta foto para finalizar actividades?\n\n ⚠️ Importante: Despues de brindar la confirmación.\n ⏳ Debemos esperar como minimo 8 seg. para finalizar tu registro.", reply_markup=k)
+            await update.message.reply_text("¿Usamos esta foto para finalizar actividades?\n\n ⚠️ Importante: Despues de brindar la confirmación.\n\n ⏳ Debemos esperar como minimo 8 seg. para finalizar tu registro.", reply_markup=k)
             return
 
         # Flujo viejo (por si llega foto fuera de lugar)
