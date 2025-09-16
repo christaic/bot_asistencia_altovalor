@@ -377,7 +377,7 @@ async def validar_contenido(update: Update, tipo: str):
         await update.message.reply_text("⚠️ Debes enviar una *foto*, no texto. 🤳")
         return False
     if tipo == "ubicacion" and not update.message.location:
-        await update.message.reply_text("📍 Por favor, envíame tu *ubicación actual* desde el clip ➜ Ubicación.")
+        await update.message.reply_text("📍 Por favor, envíame tu *ubicación actual en tiempo real* desde el clip ➜ Ubicación.")
         return False
     return True
 
@@ -392,7 +392,7 @@ async def validar_flujo(update: Update, chat_id: int) -> bool:
         return False
     
     if paso == "esperando_selfie_inicio" and not update.message.photo:
-        await update.message.reply_text("📸 Aquí solo debes enviar tu *selfie de inicio*. 🤳")
+        await update.message.reply_text("📸 Aquí solo debes enviar tu *foto de inicio*. 🤳")
         return False
     
     if paso == "esperando_live_inicio":
@@ -401,7 +401,7 @@ async def validar_flujo(update: Update, chat_id: int) -> bool:
             return False
 
     if paso == "esperando_selfie_salida" and not update.message.photo:
-        await update.message.reply_text("📸 Aquí solo debes enviar tu *selfie de salida*. 🤳")
+        await update.message.reply_text("📸 Aquí solo debes enviar tu *foto de salida*. 🤳")
         return False
     
     if paso == "esperando_live_salida":
@@ -444,15 +444,14 @@ async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     texto = """
 👋 ¡Hola! Bienvenido al bot SGA de asistencia.\n\n
+ℹ️ Instrucciones para uso del bot:
 
-ℹ️ *Instrucciones para uso del bot:*
-
-1️⃣ Usa /ingreso para registrar tu *Inicio de jornada laboral* 👷‍♂️ .  
+1️⃣ Usa /ingreso para registrar tu Inicio de jornada laboral 👷‍♂️ .  
    - Envía el nombre de tu cuadrilla  
    - Luego la foto de inicio de actividades 📸
    - Ubicación en tiempo real 📍  
 
-2️⃣ Usa /salida para tu *Fin de jornada laboral* 👷‍♂️:  
+2️⃣ Usa /salida para tu Fin de jornada laboral 👷‍♂️:  
    - Envia la foto de fin de actividades 📸  
    - Ubicación en tiempo real 📍  
 
@@ -477,7 +476,7 @@ async def ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Si no es usuario de prueba o no tiene registro, arranca el flujo
     user_data[chat_id] = {"paso": 0}  # reinicia flujo
     await update.message.reply_text(
-        "✍️ Escribe el <b>nombre de tu cuadrilla</b>.\n\n"
+        "✍️ Escribe el <b>nombre de tu cuadrilla</b>.👷‍♂️👷‍♀️\n\n"
         "✏️ Recuerda ingresarlo como aparece en <b>PHOENIX</b>.\n\n"
         "Ejemplo:\n\n <b>D 1 WIN SGA CHRISTOPHER INGA CONTRERAS</b>\n <b>D 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA</b>",
         parse_mode="HTML"
@@ -773,7 +772,7 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             "✅ Ubicación de inicio registrada.\n\n"
-            "*Recuerda que para concluir tu jornada debes usar /salida.*"
+            "Recuerda que para concluir tu jornada debes usar /salida."
         )
         return
 
@@ -789,8 +788,8 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
             marcar_registro_completo(chat_id)
         
         await update.message.reply_text(
-            "✅ Ubicación de inicio registrada.\n\n"
-            "<b>Recuerda que para concluir tu jornada debes usar /salida.</b>",
+            "✅ Ubicación de salida registrada.\n\n"
+            "<b> 👷‍♂️🦺 Salida registrada. Que tengas un buen regreso a casa. 🏠 </b>",
             parse_mode="HTML"
         )
 
@@ -816,8 +815,6 @@ async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     ud["paso"] = "esperando_selfie_salida"
     await update.message.reply_text("📸 Envía tu <b>selfie de salida</b> para finalizar jornada.", parse_mode="HTML")
-
-
 
 
 async def selfie_salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -908,7 +905,7 @@ async def manejar_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_selfie_inicio")],
                 [InlineKeyboardButton("🔄 Corregir", callback_data="repetir_selfie_inicio")],
             ])
-            await update.message.reply_text("¿Usamos esta foto para iniciar actividades?\n\n ⚠️ Importante: Despues de brindar la confirmación.\n Debemos esperar como minimo 8 seg. ⏳\n Para continuar con nuestro registro.✅", reply_markup=k)
+            await update.message.reply_text("¿Usamos esta foto para iniciar actividades?\n\n ⚠️ Importante: Despues de brindar la confirmación.\n ⏳ Debemos esperar como minimo 8 seg. para continuar.", reply_markup=k)
             return
 
         # Selfie de SALIDA -> capturamos y pedimos confirmación
@@ -921,7 +918,7 @@ async def manejar_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_selfie_salida")],
                 [InlineKeyboardButton("🔄 Corregir", callback_data="repetir_selfie_salida")],
             ])
-            await update.message.reply_text("¿Usamos esta foto para finalizar actividades?\n\n ⚠️ Importante: Despues de brindar la confirmación.\n Debemos esperar como minimo 8 seg. ⏳\n Para finalizar tu registro.✅", reply_markup=k)
+            await update.message.reply_text("¿Usamos esta foto para finalizar actividades?\n\n ⚠️ Importante: Despues de brindar la confirmación.\n ⏳ Debemos esperar como minimo 8 seg. para finalizar tu registro.", reply_markup=k)
             return
 
         # Flujo viejo (por si llega foto fuera de lugar)
@@ -1007,7 +1004,7 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
     if query.data == "repetir_selfie_salida":
         ud["pending_selfie_salida_file_id"] = None
         ud["paso"] = "esperando_selfie_salida"
-        await query.edit_message_text("🔄 Envía nuevamente tu *selfie de salida*.", parse_mode="Markdown")
+        await query.edit_message_text("🔄 Envía nuevamente tu *foto de salida*.", parse_mode="Markdown")
         return
 
     if query.data == "confirmar_selfie_salida":
