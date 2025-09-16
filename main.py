@@ -493,7 +493,8 @@ async def ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data[chat_id] = {"paso": 0}  # reinicia flujo
     await update.message.reply_text(
         "✍️ Escribe el *nombre de tu cuadrilla*.\n\n"
-        "Ejemplo:\nT1: Juan Pérez\nT2: José Flores",
+        "✏️ Recuerda ingresar el nombre de tu cuadrilla de acuerdo a como se visualiza en *PHOENIX*.\n"
+        "Ejemplo:\n *D 1 WIN SGA CHRISTOPHER INGA CONTRERAS*\n *D 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA*",
         parse_mode="Markdown"
     )
 
@@ -1107,8 +1108,8 @@ async def handle_ayuda_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
     await query.answer()
     await query.edit_message_text(
-        "ℹ️ Usa los comandos o botones para registrar tu asistencia paso a paso.\n\n"
-        "Comienza con /ingreso y sigue la secuencia estricta.",
+        "⚠️⚠️ *¡Usa los comandos o botones para registrar tu asistencia paso a paso!* \n\n"
+        "Comienza con /ingreso y sigue la secuencia para que tu asistencia se registre correctamente. ✅✅",
         parse_mode="Markdown"
     )
 
