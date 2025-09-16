@@ -208,14 +208,12 @@ HEADERS = [
     "FECHA",
     "CUADRILLA",
     "TIPO DE CUADRILLA",   # Disponibilidad | Regular
-    "SELFIE CUADRILLA",    # URL clicable en Drive
+    "FOTO INICIO CUADRILLA",    # URL clicable en Drive
     "LATITUD",
     "LONGITUD",
     "HORA INGRESO",
-    "HORA BREAK OUT",
-    "HORA BREAK IN",
     "HORA SALIDA",
-    "SELFIE SALIDA",       # URL clicable en Drive
+    "FOTO FIN CUADRILLA",       # URL clicable en Drive
     "LATITUD SALIDA",
     "LONGITUD SALIDA",
 ]
@@ -224,16 +222,14 @@ COL = {
     "FECHA": "A",
     "CUADRILLA": "B",
     "TIPO DE CUADRILLA": "C",
-    "SELFIE CUADRILLA": "D",
+    "FOTO INICIO CUADRILLA": "D",
     "LATITUD": "E",
     "LONGITUD": "F",
     "HORA INGRESO": "G",
-    "HORA BREAK OUT": "H",
-    "HORA BREAK IN": "I",
-    "HORA SALIDA": "J",
-    "SELFIE SALIDA": "K",
-    "LATITUD SALIDA": "L",
-    "LONGITUD SALIDA": "M",
+    "HORA SALIDA": "H",
+    "FOTO FIN CUADRILLA": "I",
+    "LATITUD SALIDA": "J",
+    "LONGITUD SALIDA": "K",
 }
 
 def ensure_sheet_and_headers(spreadsheet_id: str):
@@ -308,14 +304,12 @@ def append_base_row(spreadsheet_id: str, data: dict) -> int:
         "FECHA": ahora.strftime("%Y-%m-%d"),
         "CUADRILLA": data.get("CUADRILLA", ""),
         "TIPO DE CUADRILLA": data.get("TIPO DE CUADRILLA", ""),
-        "SELFIE CUADRILLA": "",
+        "FOTO INICIO CUADRILLA": "",
         "LATITUD": "",
         "LONGITUD": "",
         "HORA INGRESO": "",
-        "HORA BREAK OUT": "",
-        "HORA BREAK IN": "",
         "HORA SALIDA": "",
-        "SELFIE SALIDA": "",
+        "FOTO FIN CUADRILLA": "",
         "LATITUD SALIDA": "",
         "LONGITUD SALIDA": "",
     }
@@ -430,27 +424,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     comandos = """
-📌 *Funciones disponibles:*
+📌 Funciones disponibles:
 
 /ingreso – Iniciar registro de asistencia 📝
-/breakout – Registrar salida a Break 🍽️
-/breakin – Registrar regreso de Break 🚶
 /salida – Registrar salida final 📸
 /ayuda – Mostrar instrucciones ℹ️
 """
 
-    keyboard = [
-        [InlineKeyboardButton("📝 Ingreso", callback_data="nuevo_registro")],
-        [InlineKeyboardButton("🍽️ Break Out", callback_data="breakout")],
-        [InlineKeyboardButton("🚶 Break In", callback_data="breakin")],
-        [InlineKeyboardButton("📸 Salida", callback_data="salida")],
-        [InlineKeyboardButton("ℹ️ Ayuda", callback_data="ayuda")]
-    ]
+    keyboard = []
 
     await update.message.reply_text(
         "👋 ¡Hola! Bienvenido al bot SGA de asistencia.\n\n" + comandos,
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -458,17 +443,17 @@ async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     texto = """
-ℹ️ *Instrucciones de uso del bot:*
+👋 ¡Hola! Bienvenido al bot SGA de asistencia.\n\n
 
-1️⃣ Usa /ingreso para registrar tu *entrada*.  
-   - Envía el nombre de la cuadrilla  
-   - Luego la selfie de inicio  
-   - Y tu ubicación en tiempo real 📍  
+ℹ️ *Instrucciones para uso del bot:*
 
-2️⃣ Usa /breakout para registrar la *salida a break*. 🍽️  
-3️⃣ Usa /breakin para registrar el *regreso del break*. 🚶  
-4️⃣ Usa /salida para finalizar tu jornada:  
-   - Selfie de salida 📸  
+1️⃣ Usa /ingreso para registrar tu *Inicio de jornada laboral* 👷‍♂️ .  
+   - Envía el nombre de tu cuadrilla  
+   - Luego la foto de inicio de actividades 📸
+   - Ubicación en tiempo real 📍  
+
+2️⃣ Usa /salida para tu *Fin de jornada laboral* 👷‍♂️:  
+   - Envia la foto de fin de actividades 📸  
    - Ubicación en tiempo real 📍  
 
 ⚠️ El flujo es estricto, no puedes saltarte pasos.
@@ -522,7 +507,7 @@ async def nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("✏️ Corregir ", callback_data="corregir_nombre")],
     ]
     await update.message.reply_text(
-        f"¿Has ingresado correctamente el nombre de tu cuadrilla? 🤔🤔\n\n<b>{ud['cuadrilla']}</b>\n\n¿Es correcto?",
+        f"¿Has ingresado correctamente el nombre de tu cuadrilla 👷‍♂️? 🤔🤔\n\n<b>{ud['cuadrilla']}</b>\n\n¿Es correcto?",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
@@ -543,7 +528,7 @@ async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_
             ud["paso"] = 0
             ud["cuadrilla"] = ""
             await query.edit_message_text(
-                "✍️ <b>Escribe el nombre de tu cuadrilla nuevamente.</b>",
+                "✍️ <b>Escribe el nombre de tu cuadrilla 👷‍♂️ nuevamente.</b>",
                 parse_mode="HTML"
             )
 
@@ -722,7 +707,7 @@ async def foto_ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         filename = f"selfie_inicio_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
         link = upload_image_and_get_link(buff, filename)
-        gs_set_by_header(ssid, row, "SELFIE CUADRILLA", link)
+        gs_set_by_header(ssid, row, "FOTO INICIO CUADRILLA", link)
     except Exception as e:
         logger.error(f"[ERROR] Subiendo selfie inicio a Drive: {e}")
         await update.message.reply_text("⚠️ No pude subir la foto a Drive. Intenta otra vez.")
@@ -783,8 +768,9 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if ud.get("paso") in ("esperando_live_inicio", 2):
         update_single_cell(ssid, SHEET_TITLE, COL["LATITUD"], row, f"{lat:.6f}")
         update_single_cell(ssid, SHEET_TITLE, COL["LONGITUD"], row, f"{lon:.6f}")
-        ud["paso"] = "en_jornada"   # ya puede usar /breakout y /breakin
+        ud["paso"] = "en_jornada"   # jornada abierta hasta /salida
         user_data[chat_id] = ud
+
         await update.message.reply_text(
             "✅ Ubicación de inicio registrada.\n\n"
             "*Recuerda que para concluir tu jornada debes usar /salida.*"
@@ -809,55 +795,6 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-# ================== BREAK OUT / BREAK IN ==================
-
-async def breakout(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not es_chat_privado(update):
-        return
-    chat_id = update.effective_chat.id
-    ud = user_data.setdefault(chat_id, {})
-
-    # Validar que está en jornada
-    if ud.get("paso") != "en_jornada":
-        await update.message.reply_text("⚠️ Aún no puedes registrar Break Out. Debes haber completado tu ingreso.")
-        return
-
-    ssid, row = ud.get("spreadsheet_id"), ud.get("row")
-    if not ssid or not row:
-        await update.message.reply_text("⚠️ No hay jornada activa. Usa /ingreso para iniciar.")
-        return
-
-    hora = datetime.now(LIMA_TZ).strftime("%H:%M")
-    set_cell_value(ssid, SHEET_TITLE, f"{COL['HORA BREAK OUT']}{row}", hora)
-    ud["paso"] = "en_break"
-
-    await update.message.reply_text(f"🍽️ Break Out registrado a las {hora}.\n\n"
-                                    "Cuando regreses, usa /breakin.")
-
-
-async def breakin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not es_chat_privado(update):
-        return
-    chat_id = update.effective_chat.id
-    ud = user_data.setdefault(chat_id, {})
-
-    # Validar que está en break
-    if ud.get("paso") != "en_break":
-        await update.message.reply_text("⚠️ No puedes registrar Break In sin antes hacer Break Out.")
-        return
-
-    ssid, row = ud.get("spreadsheet_id"), ud.get("row")
-    if not ssid or not row:
-        await update.message.reply_text("⚠️ No hay jornada activa. Usa /ingreso para iniciar.")
-        return
-
-    hora = datetime.now(LIMA_TZ).strftime("%H:%M")
-    set_cell_value(ssid, SHEET_TITLE, f"{COL['HORA BREAK IN']}{row}", hora)
-    ud["paso"] = "en_jornada_post_break"
-
-    await update.message.reply_text(f"🚶 Regreso de Break registrado a las {hora}.\n\n"
-                                    "Cuando termines tu jornada, usa /salida.")
-
 
 # ================== SALIDA ==================
 
@@ -867,8 +804,8 @@ async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     ud = user_data.setdefault(chat_id, {})
 
-    # Validar que ya pasó por Break In si hizo un break
-    if ud.get("paso") not in ("en_jornada", "en_jornada_post_break"):
+    # Validar que ya inicio jornada
+    if ud.get("paso") not in ("en_jornada",):
         await update.message.reply_text("⚠️ No puedes registrar salida todavía. Debes completar los pasos previos.")
         return
 
@@ -919,9 +856,9 @@ async def selfie_salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         filename = f"selfie_salida_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
         link = upload_image_and_get_link(buff, filename)
-        gs_set_by_header(ssid, row, "SELFIE SALIDA", link)
+        gs_set_by_header(ssid, row, "FOTO FIN CUADRILLA", link)
     except Exception as e:
-        logger.error(f"[ERROR] Subiendo selfie salida a Drive: {e}")
+        logger.error(f"[ERROR] Subiendo FOTO FIN CUADRILLA a Drive: {e}")
         await update.message.reply_text("⚠️ No pude subir la foto a Drive. Reenvíala para continuar.")
         return
 
@@ -984,7 +921,7 @@ async def manejar_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_selfie_salida")],
                 [InlineKeyboardButton("🔄 Corregir", callback_data="repetir_selfie_salida")],
             ])
-            await update.message.reply_text("¿Usamos esta foto para finalizar actividades?\n\n ⚠️ Importante: Despues de brindar la confirmación.\n Debemos esperar como minimo 8 seg. ⏳\n Para continuar con nuestro registro.✅", reply_markup=k)
+            await update.message.reply_text("¿Usamos esta foto para finalizar actividades?\n\n ⚠️ Importante: Despues de brindar la confirmación.\n Debemos esperar como minimo 8 seg. ⏳\n Para finalizar tu registro.✅", reply_markup=k)
             return
 
         # Flujo viejo (por si llega foto fuera de lugar)
@@ -995,7 +932,7 @@ async def manejar_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif paso == "selfie_salida":
             await selfie_salida(update, context)
         else:
-            await update.message.reply_text("⚠️ No es momento de enviar fotos.\n\nUsa /ingreso para comenzar.")
+            await update.message.reply_text("⚠️ No es momento de enviar fotos.\n\n Usa /ingreso para comenzar.")
     except Exception as e:
         logger.error(f"[ERROR] manejar_fotos: {e}")
 
@@ -1035,7 +972,7 @@ async def handle_confirmar_selfie_inicio(update: Update, context: ContextTypes.D
         try:
             filename = f"selfie_inicio_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
             link = await _upload_selfie_from_file_id(context.bot, fid, filename)
-            update_single_cell(ssid, SHEET_TITLE, COL["SELFIE CUADRILLA"], row, link)
+            update_single_cell(ssid, SHEET_TITLE, COL["FOTO INICIO CUADRILLA"], row, link)
 
             # Hora de ingreso
             hora = datetime.now(LIMA_TZ).strftime("%H:%M")
@@ -1082,7 +1019,7 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
         try:
             filename = f"selfie_salida_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
             link = await _upload_selfie_from_file_id(context.bot, fid, filename)
-            update_single_cell(ssid, SHEET_TITLE, COL["SELFIE SALIDA"], row, link)
+            update_single_cell(ssid, SHEET_TITLE, COL["FOTO FIN CUADRILLA"], row, link)
 
             # Hora de salida
             hora = datetime.now(LIMA_TZ).strftime("%H:%M")
@@ -1131,8 +1068,6 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("ayuda", ayuda))
     app.add_handler(CommandHandler("ingreso", ingreso))
-    app.add_handler(CommandHandler("breakout", breakout))
-    app.add_handler(CommandHandler("breakin", breakin))
     app.add_handler(CommandHandler("salida", salida))
 
     # --- MENSAJES ---
