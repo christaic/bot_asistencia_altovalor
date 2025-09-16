@@ -518,8 +518,8 @@ async def nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     ud["cuadrilla"] = update.message.text.strip()
     keyboard = [
-        [InlineKeyboardButton("✅ *Confirmar*", callback_data="confirmar_nombre")],
-        [InlineKeyboardButton("✏️ *Corregir*", callback_data="corregir_nombre")],
+        [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_nombre")],
+        [InlineKeyboardButton("✏️ Corregir ", callback_data="corregir_nombre")],
     ]
     await update.message.reply_text(
         f"¿Has ingresado correctamente el nombre de tu cuadrilla? 🤔🤔\n\n*{ud['cuadrilla']}*\n\n¿Es correcto?",
@@ -570,8 +570,8 @@ async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_
             # 3) Avanza a tipo de cuadrilla
             ud["paso"] = "tipo"
             keyboard = [
-                [InlineKeyboardButton("🟠 *DISPONIBILIDAD*", callback_data="tipo_disp")],
-                [InlineKeyboardButton("⚪ *REGULAR*", callback_data="tipo_reg")],
+                [InlineKeyboardButton("🟠 DISPONIBILIDAD", callback_data="tipo_disp")],
+                [InlineKeyboardButton("⚪ REGULAR", callback_data="tipo_reg")],
             ]
             await query.edit_message_text(
                 "Selecciona el *tipo de cuadrilla*:",
@@ -619,13 +619,13 @@ async def handle_tipo_cuadrilla(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     # Guarda selección provisional (sin escribir aún en el Sheet)
-    seleccion = "*DISPONIBILIDAD*" if data == "tipo_disp" else "*REGULAR*"
+    seleccion = "DISPONIBILIDAD" if data == "tipo_disp" else "REGULAR"
     ud["tipo_seleccionado"] = seleccion
     ud["paso"] = "confirmar_tipo"
 
     k = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ *Confirmar*", callback_data="confirmar_tipo")],
-        [InlineKeyboardButton("✏️ *Corregir*", callback_data="corregir_tipo")],
+        [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_tipo")],
+        [InlineKeyboardButton("✏️ Corregir", callback_data="corregir_tipo")],
     ])
     await query.edit_message_text(
         f"Seleccionaste: *{seleccion}*.\n\n¿Es correcto?",
@@ -654,8 +654,8 @@ async def handle_confirmar_tipo(update: Update, context: ContextTypes.DEFAULT_TY
     if data == "corregir_tipo":
         # Volver a elegir
         k = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🟠 *DISPONIBILIDAD*", callback_data="tipo_disp")],
-            [InlineKeyboardButton("⚪ *REGULAR*", callback_data="tipo_reg")],
+            [InlineKeyboardButton("🟠 DISPONIBILIDAD", callback_data="tipo_disp")],
+            [InlineKeyboardButton("⚪ REGULAR", callback_data="tipo_reg")],
         ])
         await query.edit_message_text("Selecciona el *tipo de cuadrilla*:", parse_mode="Markdown", reply_markup=k)
         return
@@ -776,7 +776,7 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_live:
         await update.message.reply_text(
             "⚠️ Por favor, comparte tu *ubicación en tiempo real*.\n\n"
-            "Toca el clip ➜ Ubicación ➜ **Compartir ubicación en tiempo real**."
+            "Toca el clip ➜ Ubicación ➜ *Compartir ubicación en tiempo real*."
         )
         return
 
@@ -964,8 +964,8 @@ async def manejar_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ud["pending_selfie_inicio_file_id"] = photo.file_id
             ud["paso"] = "confirmar_selfie_inicio"
             k = InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ *Confirmar*", callback_data="confirmar_selfie_inicio")],
-                [InlineKeyboardButton("🔄 *Corregir*", callback_data="repetir_selfie_inicio")],
+                [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_selfie_inicio")],
+                [InlineKeyboardButton("🔄 Corregir", callback_data="repetir_selfie_inicio")],
             ])
             await update.message.reply_text("¿Usamos esta foto para iniciar actividades?\n\n ⚠️ Importante: Despues de brindar la confirmación.\n Debemos esperar como minimo 8 seg. ⏳\n Para continuar con nuestro registro.✅", reply_markup=k)
             return
@@ -977,8 +977,8 @@ async def manejar_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ud["pending_selfie_salida_file_id"] = photo.file_id
             ud["paso"] = "confirmar_selfie_salida"
             k = InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ *Confirmar*", callback_data="confirmar_selfie_salida")],
-                [InlineKeyboardButton("🔄 *Corregir*", callback_data="repetir_selfie_salida")],
+                [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_selfie_salida")],
+                [InlineKeyboardButton("🔄 Corregir", callback_data="repetir_selfie_salida")],
             ])
             await update.message.reply_text("¿Usamos esta foto para finalizar actividades?\n\n ⚠️ Importante: Despues de brindar la confirmación.\n Debemos esperar como minimo 8 seg. ⏳\n Para continuar con nuestro registro.✅", reply_markup=k)
             return
