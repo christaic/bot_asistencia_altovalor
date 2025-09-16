@@ -814,7 +814,7 @@ async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     ud["paso"] = "esperando_selfie_salida"
-    await update.message.reply_text("📸 Envía tu <b>selfie de salida</b> para finalizar jornada.", parse_mode="HTML")
+    await update.message.reply_text("📸 Envía tu foto de <b>de Fin con tus EPPs completos</b>.", parse_mode="HTML")
 
 
 async def selfie_salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
