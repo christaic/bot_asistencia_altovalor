@@ -418,7 +418,7 @@ async def validar_flujo(update: Update, chat_id: int) -> bool:
     # al final de validar_flujo
     
     if paso not in (0, "esperando_selfie_inicio", "esperando_live_inicio", "esperando_selfie_salida", "esperando_live_salida"):
-        await update.message.reply_text("⚠️ Ahora no puedes enviar este tipo de contenido. Sigue el flujo del registro.")
+        await update.message.reply_text("⚠️ Ahora no puedes enviar este tipo de contenido, has excedido el limite de tiempo de espera ().\n\n Escribe nuevamente /start para reiniciar correctamente.")
         return False
     
     return True
@@ -493,8 +493,8 @@ async def ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data[chat_id] = {"paso": 0}  # reinicia flujo
     await update.message.reply_text(
         "✍️ Escribe el *nombre de tu cuadrilla*.\n\n"
-        "✏️ Recuerda ingresar el nombre de tu cuadrilla de acuerdo a como se visualiza en *PHOENIX*.\n"
-        "Ejemplo:\n *D 1 WIN SGA CHRISTOPHER INGA CONTRERAS*\n *D 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA*",
+        "✏️ Recuerda ingresar el nombre de tu cuadrilla de acuerdo a como se visualiza en *PHOENIX*.\n\n"
+        "Ejemplo:\n\n *D 1 WIN SGA CHRISTOPHER INGA CONTRERAS*\n *D 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA*",
         parse_mode="Markdown"
     )
 
@@ -518,11 +518,11 @@ async def nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     ud["cuadrilla"] = update.message.text.strip()
     keyboard = [
-        [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_nombre")],
-        [InlineKeyboardButton("✏️ Corregir", callback_data="corregir_nombre")],
+        [InlineKeyboardButton("✅ *Confirmar*", callback_data="confirmar_nombre")],
+        [InlineKeyboardButton("✏️ *Corregir*", callback_data="corregir_nombre")],
     ]
     await update.message.reply_text(
-        f"Has ingresado la cuadrilla:\n*{ud['cuadrilla']}*\n\n¿Es correcto?",
+        f"¿Has ingresado correctamente el nombre de tu cuadrilla? 🤔🤔\n\n*{ud['cuadrilla']}*\n\n¿Es correcto?",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
@@ -570,8 +570,8 @@ async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_
             # 3) Avanza a tipo de cuadrilla
             ud["paso"] = "tipo"
             keyboard = [
-                [InlineKeyboardButton("🟢 Disponibilidad", callback_data="tipo_disp")],
-                [InlineKeyboardButton("⚪ Regular", callback_data="tipo_reg")],
+                [InlineKeyboardButton("🟠 *DISPONIBILIDAD*", callback_data="tipo_disp")],
+                [InlineKeyboardButton("⚪ *REGULAR*", callback_data="tipo_reg")],
             ]
             await query.edit_message_text(
                 "Selecciona el *tipo de cuadrilla*:",
@@ -619,13 +619,13 @@ async def handle_tipo_cuadrilla(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     # Guarda selección provisional (sin escribir aún en el Sheet)
-    seleccion = "Disponibilidad" if data == "tipo_disp" else "Regular"
+    seleccion = "*DISPONIBILIDAD*" if data == "tipo_disp" else "*REGULAR*"
     ud["tipo_seleccionado"] = seleccion
     ud["paso"] = "confirmar_tipo"
 
     k = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Confirmar tipo", callback_data="confirmar_tipo")],
-        [InlineKeyboardButton("✏️ Cambiar tipo", callback_data="corregir_tipo")],
+        [InlineKeyboardButton("✅ *Confirmar*", callback_data="confirmar_tipo")],
+        [InlineKeyboardButton("✏️ *Corregir*", callback_data="corregir_tipo")],
     ])
     await query.edit_message_text(
         f"Seleccionaste: *{seleccion}*.\n\n¿Es correcto?",
@@ -654,8 +654,8 @@ async def handle_confirmar_tipo(update: Update, context: ContextTypes.DEFAULT_TY
     if data == "corregir_tipo":
         # Volver a elegir
         k = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🟢 Disponibilidad", callback_data="tipo_disp")],
-            [InlineKeyboardButton("⚪ Regular", callback_data="tipo_reg")],
+            [InlineKeyboardButton("🟠 *DISPONIBILIDAD*", callback_data="tipo_disp")],
+            [InlineKeyboardButton("⚪ *REGULAR*", callback_data="tipo_reg")],
         ])
         await query.edit_message_text("Selecciona el *tipo de cuadrilla*:", parse_mode="Markdown", reply_markup=k)
         return
@@ -679,7 +679,7 @@ async def handle_confirmar_tipo(update: Update, context: ContextTypes.DEFAULT_TY
         ud["paso"] = "esperando_selfie_inicio"
 
         await query.edit_message_text(
-            f"Tipo confirmado: *{tipo}*.\n\n📸 Envía la *selfie de la cuadrilla (inicio)*.",
+            f"Tipificación de cuadrilla confirmada: *{tipo}*.\n\n📸 Envía tu foto de *Inicio con tus EPPs completos*.",
             parse_mode="Markdown"
         )
 
@@ -788,7 +788,7 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data[chat_id] = ud
         await update.message.reply_text(
             "✅ Ubicación de inicio registrada.\n\n"
-            "Usa /breakout y /breakin durante el día. Para terminar, usa /salida."
+            "*Recuerda que para concluir tu jornada debes usar /salida.*"
         )
         return
 
@@ -803,7 +803,7 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if chat_id not in USUARIOS_TEST:
             marcar_registro_completo(chat_id)
         
-        await update.message.reply_text("✅ Ubicación de salida registrada. ¡Jornada finalizada! 🙌")
+        await update.message.reply_text("✅ Ubicación de salida registrada.""\n\n ¡Jornada finalizada!🏠")
         return
 
 
@@ -964,10 +964,10 @@ async def manejar_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ud["pending_selfie_inicio_file_id"] = photo.file_id
             ud["paso"] = "confirmar_selfie_inicio"
             k = InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Selfie correcta (subir a Drive)", callback_data="confirmar_selfie_inicio")],
-                [InlineKeyboardButton("🔄 Repetir selfie", callback_data="repetir_selfie_inicio")],
+                [InlineKeyboardButton("✅ *Confirmar*", callback_data="confirmar_selfie_inicio")],
+                [InlineKeyboardButton("🔄 *Corregir*", callback_data="repetir_selfie_inicio")],
             ])
-            await update.message.reply_text("¿Usamos esta foto de inicio?", reply_markup=k)
+            await update.message.reply_text("¿Usamos esta foto para iniciar actividades?\n\n ⚠️ Importante: Despues de brindar la confirmación.\n Debemos esperar como minimo 8 seg. ⏳\n Para continuar con nuestro registro.✅", reply_markup=k)
             return
 
         # Selfie de SALIDA -> capturamos y pedimos confirmación
@@ -977,10 +977,10 @@ async def manejar_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ud["pending_selfie_salida_file_id"] = photo.file_id
             ud["paso"] = "confirmar_selfie_salida"
             k = InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Selfie correcta (subir a Drive)", callback_data="confirmar_selfie_salida")],
-                [InlineKeyboardButton("🔄 Repetir selfie", callback_data="repetir_selfie_salida")],
+                [InlineKeyboardButton("✅ *Confirmar*", callback_data="confirmar_selfie_salida")],
+                [InlineKeyboardButton("🔄 *Corregir*", callback_data="repetir_selfie_salida")],
             ])
-            await update.message.reply_text("¿Usamos esta foto de salida?", reply_markup=k)
+            await update.message.reply_text("¿Usamos esta foto para finalizar actividades?\n\n ⚠️ Importante: Despues de brindar la confirmación.\n Debemos esperar como minimo 8 seg. ⏳\n Para continuar con nuestro registro.✅", reply_markup=k)
             return
 
         # Flujo viejo (por si llega foto fuera de lugar)
@@ -1019,14 +1019,14 @@ async def handle_confirmar_selfie_inicio(update: Update, context: ContextTypes.D
     if query.data == "repetir_selfie_inicio":
         ud["pending_selfie_inicio_file_id"] = None
         ud["paso"] = "esperando_selfie_inicio"
-        await query.edit_message_text("🔄 Envía nuevamente tu *selfie de inicio*.", parse_mode="Markdown")
+        await query.edit_message_text("🔄 *Envía nuevamente tu foto de inicio de actividades.*", parse_mode="Markdown")
         return
 
     if query.data == "confirmar_selfie_inicio":
         ssid, row = ud.get("spreadsheet_id"), ud.get("row")
         fid = ud.get("pending_selfie_inicio_file_id")
         if not (ssid and row and fid):
-            await query.edit_message_text("❌ Falta selfie o registro. Usa /ingreso de nuevo.")
+            await query.edit_message_text("❌ *Falta foto de inicio de actividades.*")
             return
         try:
             filename = f"selfie_inicio_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
@@ -1043,13 +1043,13 @@ async def handle_confirmar_selfie_inicio(update: Update, context: ContextTypes.D
             ud["pending_selfie_inicio_file_id"] = None
 
             await query.edit_message_text(
-                f"✅ Selfie subida. ⏱️ Hora ingreso: *{hora}*.\n\n"
-                "📍 Envía tu *ubicación en tiempo real* (en Telegram elige “Compartir ubicación en tiempo real”).",
+                f"✅ Fotografía registrada. ⏱️ Hora de inicio: *{hora}*.\n\n"
+                "📍 Ahora envía tu *ubicación en tiempo real* \n\n(Elige “Compartir ubicación en tiempo real*”📍).",
                 parse_mode="Markdown"
             )
         except Exception as e:
             logger.error(f"[ERROR] confirm_selfie_inicio upload: {e}")
-            await query.edit_message_text("⚠️ No pude subir la foto a Drive. Reintenta enviando la selfie.")
+            await query.edit_message_text("⚠️ No pude registra tu foto.\n Reintenta enviando tu foto nuevamente.")
 
 
 async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1088,8 +1088,8 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
             ud["pending_selfie_salida_file_id"] = None
 
             await query.edit_message_text(
-                f"✅ Selfie subida. ⏱️ Hora salida: *{hora}*.\n\n"
-                "📍 Comparte tu *ubicación en tiempo real* para finalizar.",
+                f"✅ Fotografía registrada. ⏱️ Hora de salida registrada: *{hora}*.\n\n"
+                "📍 Ahora envía tu *ubicación en tiempo real* \n\n(Elige “Compartir ubicación en tiempo real*”📍).",
                 parse_mode="Markdown"
             )
         except Exception as e:
