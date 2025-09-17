@@ -1193,12 +1193,20 @@ def main():
     # --- DEBUG: atrapa cualquier callback primero ---
     app.add_handler(CallbackQueryHandler(debug_callback_catcher, block=False), group=-1)
 
-    # --- COMANDOS ---
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("ayuda", ayuda))
-    app.add_handler(CommandHandler("ingreso", ingreso))
-    app.add_handler(CommandHandler("salida", salida))
-    app.add_handler(MessageHandler(filters.COMMAND, filtro_comandos_fuera_de_lugar),group=1)
+    # --- COMANDOS válidos ---
+    app.add_handler(CommandHandler("start", start), block=True)
+    app.add_handler(CommandHandler("ayuda", ayuda), block=True)
+    app.add_handler(CommandHandler("ingreso", ingreso), block=True)
+    app.add_handler(CommandHandler("salida", salida), block=True)
+
+    # --- COMANDOS inválidos (filtro general) ---
+    app.add_handler(
+        MessageHandler(
+            filters.COMMAND & ~filters.Command(["start", "ingreso", "salida", "ayuda"]),
+            filtro_comandos_fuera_de_lugar,
+        ),
+        group=1
+    )
 
     # --- MENSAJES ---
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, nombre_cuadrilla))
