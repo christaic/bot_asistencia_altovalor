@@ -6,6 +6,8 @@ import json
 import logging
 from datetime import datetime
 from datetime import date
+from PIL import Image
+import gc
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -19,6 +21,37 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from pytz import timezone
+
+#== COMPRIMIR IMAGEN VARIABLE==
+
+def comprimir_y_subir(buff: io.BytesIO, filename: str, ssid: str, row: int, header: str) -> str:
+    """
+    Comprime la imagen al 80%, la sube a Drive y guarda el link en Google Sheets.
+    """
+    try:
+        compressed = io.BytesIO()
+        img = Image.open(buff)
+        img.save(compressed, format="JPEG", quality=80, optimize=True, progressive=True)
+        compressed.seek(0)
+
+        # Liberar RAM del buffer original
+        buff.close()
+        del buff
+        gc.collect()
+
+        # Subir a Drive
+        link = upload_image_and_get_link(compressed, filename)
+        gs_set_by_header(ssid, row, header, link)
+
+        # Liberar RAM del comprimido
+        compressed.close()
+        del compressed, img
+        gc.collect()
+
+        return link
+    except Exception as e:
+        logger.error(f"[ERROR] comprimir_y_subir: {e}")
+        raise
 
 # Control de registros diarios (chat_id -> fecha último registro finalizado)
 
@@ -392,21 +425,21 @@ async def validar_flujo(update: Update, chat_id: int) -> bool:
         return False
     
     if paso == "esperando_selfie_inicio" and not update.message.photo:
-        await update.message.reply_text("📸 Aquí solo debes enviar tu *foto de inicio*. 🤳")
+        await update.message.reply_text("📸 Aquí solo debes enviar tu foto de inicio. 🤳")
         return False
     
     if paso == "esperando_live_inicio":
         if not update.message.location or not getattr(update.message.location, "live_period", None):
-            await update.message.reply_text("📍 Debes compartir tu *ubicación en tiempo real*, no una ubicación fija.")
+            await update.message.reply_text("📍 Debes compartir tu ubicación en tiempo real.")
             return False
 
     if paso == "esperando_selfie_salida" and not update.message.photo:
-        await update.message.reply_text("📸 Aquí solo debes enviar tu *foto de salida*. 🤳")
+        await update.message.reply_text("📸 Aquí solo debes enviar tu foto de salida. 🤳")
         return False
     
     if paso == "esperando_live_salida":
         if not update.message.location or not getattr(update.message.location, "live_period", None):
-            await update.message.reply_text("📍 Aquí solo debes compartir tu *ubicación final en tiempo real*. 🔴")
+            await update.message.reply_text("📍 Aquí solo debes compartir tu ubicación en tiempo real. 🔴")
             return False
 
     # al final de validar_flujo
@@ -419,8 +452,17 @@ async def validar_flujo(update: Update, chat_id: int) -> bool:
 
 
 # ================== COMANDOS ==================
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not es_chat_privado(update):
+        return
+    chat_id = update.effective_chat.id
+    ud = user_data.get(chat_id, {})
+
+    if ud.get("paso") and ud.get("paso") not in (None, "finalizado"):
+        await update.message.reply_text(
+            "⚠️ Ya tienes un registro en curso.\n\nPresiona /ayuda y té guiaré."
+        )
         return
 
     comandos = """
@@ -434,7 +476,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = []
 
     await update.message.reply_text(
-        "👋 ¡Hola! Bienvenido al bot SGA de asistencia.\n\n" + comandos,
+        "👋👋 ¡Hola! Bienvenido al bot asistencia SGA - WIN 👷‍♂️👷‍♂️.\n\n" + comandos,
         parse_mode="HTML",
     )
 
@@ -443,7 +485,7 @@ async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     texto = """
-👋 ¡Hola! Bienvenido al bot SGA de asistencia.\n\n
+👋 👋 ¡Hola! Bienvenido al bot asistencia SGA - WIN 👷‍♂️👷‍♂️\n\n
 ℹ️ Instrucciones para uso del bot:
 
 1️⃣ Usa /ingreso para registrar tu Inicio de jornada laboral 👷‍♂️ .  
@@ -455,26 +497,35 @@ async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
    - Envia la foto de fin de actividades 📸  
    - Ubicación en tiempo real 📍  
 
-⚠️ El flujo es estricto, no puedes saltarte pasos.
+‼️ El flujo es estricto, no puedes saltarte pasos. 🧐\n
+
 """
 
     await update.message.reply_text(texto, parse_mode="HTML")
 
-
+# ================== INGRESO ==================
 async def ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not es_chat_privado(update):
         return
     chat_id = update.effective_chat.id
+    ud = user_data.get(chat_id, {})
 
-    # ✅ Validar si ya completó un registro hoy y si no está en la lista de prueba, aplica restricción #
-    if chat_id not in USUARIOS_TEST and ya_registro_hoy(chat_id):
+    # 🚦 1. Si ya está en medio de un registro y no ha hecho salida, no permitir nuevo ingreso
+    if ud.get("paso") not in (None, "finalizado"):
         await update.message.reply_text(
-            "⚠️ Ya realizaste un registro completo hoy. Solo puedes hacer uno por día. ✅"
+            "⚠️ Ya tienes un registro en curso.\n\nPresiona /ayuda y té guiaré."
         )
         return
 
-    # Si no es usuario de prueba o no tiene registro, arranca el flujo
-    user_data[chat_id] = {"paso": 0}  # reinicia flujo
+    # 🚦 2. Si es usuario normal (no test) y ya registró hoy, bloquear
+    if chat_id not in USUARIOS_TEST and ya_registro_hoy(chat_id):
+        await update.message.reply_text(
+            "⚠️ Ya completaste tu registro de hoy.\n\nDebes esperar hasta mañana para iniciar uno nuevo."
+        )
+        return
+
+    # ✅ 3. Caso válido: iniciar nuevo flujo
+    user_data[chat_id] = {"paso": 0}
     await update.message.reply_text(
         "✍️ Escribe el <b>nombre de tu cuadrilla</b>.👷‍♂️👷‍♀️\n\n"
         "✏️ Recuerda ingresarlo como aparece en <b>PHOENIX</b>.\n\n"
@@ -615,6 +666,7 @@ async def handle_tipo_cuadrilla(update: Update, context: ContextTypes.DEFAULT_TY
         parse_mode="HTML",
         reply_markup=k
     )
+
 # ====================== CORREGIR TIPO O CONFIRMAR ===========
 
 async def handle_confirmar_tipo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -702,14 +754,12 @@ async def foto_ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ No pude leer la foto desde Telegram. Reenvíala, por favor.")
         return
 
-    # 2) Subir a Drive y guardar link en el Sheet
+    # 2) Comprimir, subir y guardar link en el Sheet
     try:
         filename = f"selfie_inicio_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
-        link = upload_image_and_get_link(buff, filename)
-        gs_set_by_header(ssid, row, "FOTO INICIO CUADRILLA", link)
-    except Exception as e:
-        logger.error(f"[ERROR] Subiendo selfie inicio a Drive: {e}")
-        await update.message.reply_text("⚠️ No pude subir la foto a Drive. Intenta otra vez.")
+        link = comprimir_y_subir(buff, filename, ssid, row, "FOTO INICIO CUADRILLA")
+    except Exception:
+        await update.message.reply_text("⚠️ No pude registar tu foto. Porfavor, intenta otra vez. 📸📸")
         return
 
     # 3) Registrar hora de ingreso
@@ -803,16 +853,30 @@ async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     ud = user_data.setdefault(chat_id, {})
 
-    # Validar que ya inicio jornada
-    if ud.get("paso") not in ("en_jornada",):
-        await update.message.reply_text("⚠️ No puedes registrar salida todavía. Debes completar los pasos previos.")
-        return
+    # 🚦 Validar pasos obligatorios antes de permitir salida
+    if not ud.get("cuadrilla"):
+        await update.message.reply_text("⚠️ No puedes registrar salida todavía. Te falta escribir el <b>nombre de la cuadrilla ✍️</b>", parse_mode="HTML")
+        return 
 
+    if not ud.get("hora_ingreso"):
+        await update.message.reply_text("⚠️ No puedes registrar salida todavía. Te falta tu <b>selfie de inicio 📸</b>", parse_mode="HTML")
+        return
+    
+    if ud.get("paso") in ("esperando_live_inicio", 0, "confirmar_selfie_inicio"):
+        await update.message.reply_text("⚠️ No puedes registrar salida todavía. Te falta tu <b>ubicación en tiempo real 📍</b>", parse_mode="HTML")
+        return
+    
+    # 🚦 Si ya está finalizado, bloquear
+    if ud.get("paso") == "finalizado":
+        await update.message.reply_text("✅ Ya completaste tu registro hoy. No puedes registrar otra salida.")
+        return
+    
+    # ✅ Si cumplió con lo mínimo → permitir selfie de salida
     ssid, row = ud.get("spreadsheet_id"), ud.get("row")
     if not ssid or not row:
         await update.message.reply_text("⚠️ No hay jornada activa. Usa /ingreso para iniciar.")
         return
-
+    
     ud["paso"] = "esperando_selfie_salida"
     await update.message.reply_text("📸 Envía tu foto de <b>fin de labores con tus EPPs completos</b>.\n Para finalizar tu jornada. 🏠", parse_mode="HTML")
 
@@ -849,14 +913,12 @@ async def selfie_salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ No pude leer la foto desde Telegram. Reenvíala, por favor.")
         return
 
-    # 2) Subir a Drive y guardar link
+    # 2) Comprimir, subir y guardar link
     try:
         filename = f"selfie_salida_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
-        link = upload_image_and_get_link(buff, filename)
-        gs_set_by_header(ssid, row, "FOTO FIN CUADRILLA", link)
-    except Exception as e:
-        logger.error(f"[ERROR] Subiendo FOTO FIN CUADRILLA a Drive: {e}")
-        await update.message.reply_text("⚠️ No pude subir la foto a Drive. Reenvíala para continuar.")
+        link = comprimir_y_subir(buff, filename, ssid, row, "FOTO FIN CUADRILLA")
+    except Exception:
+        await update.message.reply_text("⚠️ No pude subir la foto de salida a Drive. Reenvíala para continuar.")
         return
 
     # 3) Registrar hora salida y pedir ubicación final
@@ -934,12 +996,34 @@ async def manejar_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"[ERROR] manejar_fotos: {e}")
 
 
-async def _upload_selfie_from_file_id(bot, file_id: str, filename: str) -> str:
+async def _upload_selfie_from_file_id(bot, file_id: str, filename: str, ssid: str, row: int, header: str) -> str:
+    """
+    Descarga una foto de Telegram, la comprime al 80%, la sube a Drive y la guarda en Google Sheets.
+    """
     buff = io.BytesIO()
     tg_file = await bot.get_file(file_id)
     await tg_file.download_to_memory(out=buff)  # PTB v20
-    link = upload_image_and_get_link(buff, filename)
+    buff.seek(0)
+
+    # Usamos el helper centralizado
+    link = comprimir_y_subir(buff, filename, ssid, row, header)
     return link
+
+
+#============= FUERA DE LUGAR ===========================
+
+async def filtro_comandos_fuera_de_lugar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    ud = user_data.get(chat_id, {})
+
+    if ud.get("paso") and ud.get("paso") not in (None, "finalizado"):
+        cmd = update.message.text
+        if cmd.startswith("/") and cmd not in ["/ayuda", "/salida"]:
+            await update.message.reply_text(
+                "⚠️ No puedes usar este comando mientras tu registro está en curso.<br>"
+                "Usa solo <b>/salida</b> para finalizar o <b>/ayuda</b> si necesitas instrucciones.",
+                parse_mode="HTML"
+            )
 
 # ============= CONFIRMAR SELFIE INICIO & SALIDA =========
 
@@ -968,8 +1052,7 @@ async def handle_confirmar_selfie_inicio(update: Update, context: ContextTypes.D
             return
         try:
             filename = f"selfie_inicio_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
-            link = await _upload_selfie_from_file_id(context.bot, fid, filename)
-            update_single_cell(ssid, SHEET_TITLE, COL["FOTO INICIO CUADRILLA"], row, link)
+            link = await _upload_selfie_from_file_id(context.bot, fid, filename, ssid, row, "FOTO INICIO CUADRILLA")
 
             # Hora de ingreso
             hora = datetime.now(LIMA_TZ).strftime("%H:%M")
@@ -1015,8 +1098,8 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
             return
         try:
             filename = f"selfie_salida_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
-            link = await _upload_selfie_from_file_id(context.bot, fid, filename)
-            update_single_cell(ssid, SHEET_TITLE, COL["FOTO FIN CUADRILLA"], row, link)
+            link = await _upload_selfie_from_file_id(context.bot, fid, filename, ssid, row, "FOTO FIN CUADRILLA")
+
 
             # Hora de salida
             hora = datetime.now(LIMA_TZ).strftime("%H:%M")
@@ -1066,6 +1149,8 @@ def main():
     app.add_handler(CommandHandler("ayuda", ayuda))
     app.add_handler(CommandHandler("ingreso", ingreso))
     app.add_handler(CommandHandler("salida", salida))
+    app.add_handler(MessageHandler(filters.COMMAND, filtro_comandos_fuera_de_lugar), group=1)
+
 
     # --- MENSAJES ---
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, nombre_cuadrilla))
