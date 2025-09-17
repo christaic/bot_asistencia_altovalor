@@ -480,9 +480,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ud = user_data.get(chat_id, {})
 
     if ud.get("paso") and ud.get("paso") not in (None, "finalizado"):
-        await update.message.reply_text(
-            "⚠️ Ya tienes un registro en curso.\n\nPresiona /ayuda y té guiaré."
+        paso = ud.get("paso")
+        msg = PASOS.get(paso, {}).get(
+            "mensaje", "⚠️ Ya tienes un registro en curso. Complétalo con /salida."
         )
+        await update.message.reply_text(msg, parse_mode="HTML")
         return
 
     comandos = """
@@ -532,10 +534,13 @@ async def ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 🚦 1. Si ya está en medio de un registro y no ha hecho salida, no permitir nuevo ingreso
     if ud.get("paso") not in (None, "finalizado"):
-        await update.message.reply_text(
-            "⚠️ Ya tienes un registro en curso.\n\nPresiona /ayuda y té guiaré."
+        paso = ud.get("paso")
+        msg = PASOS.get(paso, {}).get(
+            "mensaje", "⚠️ Ya tienes un registro en curso. Complétalo con /salida."
         )
+        await update.message.reply_text(msg, parse_mode="HTML")
         return
+
 
     # 🚦 2. Si es usuario normal (no test) y ya registró hoy, bloquear
     if chat_id not in USUARIOS_TEST and ya_registro_hoy(chat_id):
@@ -1025,25 +1030,6 @@ async def filtro_comandos_fuera_de_lugar(update: Update, context: ContextTypes.D
     text = update.message.text.strip()
     command = text.lstrip("/").split()[0].lower()
     ud = user_data.get(chat_id, {})
-
-    # --- START e INGRESO ---
-    if command in ["start", "ingreso"]:
-        if not ud or not ud.get("row"):
-            if command == "ingreso":
-                # Aquí inicias el flujo normal
-                return await ingreso(update, context)
-            else:
-                await update.message.reply_text(
-                    "👋 Hola, para comenzar tu jornada usa el comando <b>/ingreso</b>.",
-                    parse_mode="HTML"
-                )
-            return
-
-        # Si ya hay flujo abierto → mostrar mensaje del paso pendiente
-        paso = ud.get("paso")
-        msg = PASOS.get(paso, {}).get("mensaje", "⚠️ Ya tienes un registro activo. Complétalo con /salida.")
-        await update.message.reply_text(msg, parse_mode="HTML")
-        return
 
     # --- SALIDA ---
     if command == "salida":
