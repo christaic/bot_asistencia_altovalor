@@ -1048,22 +1048,7 @@ async def filtro_comandos_fuera_de_lugar(update: Update, context: ContextTypes.D
 
         # Aquí ya está en el punto correcto para salida
         return await salida(update, context)
-
-    # --- AYUDA ---
-    if command == "ayuda":
-        if not ud or not ud.get("row"):
-            await update.message.reply_text(
-                "ℹ️ Para comenzar tu jornada usa <b>/ingreso</b>.\n"
-                "Cuando termines, ciérrala con <b>/salida</b>.\n\n"
-                "Si necesitas soporte, escribe /ayuda .",
-                parse_mode="HTML"
-            )
-        else:
-            paso = ud.get("paso")
-            msg = PASOS.get(paso, {}).get("mensaje", "⚠️ Ya tienes un registro activo. Complétalo con /salida.")
-            await update.message.reply_text(msg, parse_mode="HTML")
-        return
-
+    
     # --- Otros comandos bloqueados ---
     await update.message.reply_text(
         "⚠️ Comando no permitido en este momento.\n"
