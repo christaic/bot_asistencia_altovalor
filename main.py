@@ -467,7 +467,7 @@ async def validar_flujo(update: Update, chat_id: int) -> bool:
 
     if paso == 0 and not update.message.text:
         await update.message.reply_text("✍️ Escribe el nombre de tu cuadrilla.👷‍♂️👷‍♀️\n\n""✏️ Recuerda ingresarlo como aparece en PHOENIX.\n\n"
-        "Ejemplo:\n\n D 1 WIN SGA CHRISTOPHER INGA CONTRERAS\nD 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA<b> ✍️")
+        "Ejemplo:\n\n D 1 WIN SGA CHRISTOPHER INGA CONTRERAS\n\nD 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA ✍️")
         return False
     
     if paso == "esperando_selfie_inicio" and not update.message.photo:
