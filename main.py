@@ -292,19 +292,19 @@ COL = {
 
 PASOS = {
     "esperando_cuadrilla": {
-        "mensaje": "✍️ Te falta escribir el <b>nombre de tu cuadrilla</b>."
+        "mensaje": "✍️ Te falta escribir el nombre de tu cuadrilla."
     },
     "esperando_selfie_inicio": {
-        "mensaje": "📸 Te falta tu <b>foto de inicio</b>."
+        "mensaje": "📸 Te falta tu foto de inicio."
     },
     "esperando_live_inicio": {
-        "mensaje": "📍 Te falta tu <b>ubicación en tiempo real</b> de inicio."
+        "mensaje": "📍 Te falta tu ubicación en tiempo real de inicio."
     },
     "esperando_selfie_salida": {
-        "mensaje": "📸 Te falta tu <b>foto de salida</b>."
+        "mensaje": "📸 Te falta tu foto de salida."
     },
     "esperando_live_salida": {
-        "mensaje": "📍 Te falta tu <b>ubicación en tiempo real</b> de salida."
+        "mensaje": "📍 Te falta tu ubicación en tiempo real de salida."
     },
     "cerrado": {
         "mensaje": "✅ Registro completado. No puedes iniciar otro hasta mañana."
@@ -406,6 +406,7 @@ def gs_set_by_header(spreadsheet_id: str, row: int, header: str, value):
     set_cell_value(spreadsheet_id, SHEET_TITLE, f"{col}{row}", value)
 
 # ================== ESTADO EN MEMORIA ==================
+
 user_data = {}  # por chat_id (privado)
 
 # ================== SOLO PRIVADO ==================
@@ -445,7 +446,6 @@ async def init_bot_info(app):
     logger.info(f"Bot iniciado como {BOT_USERNAME}")
 
 
-
 # ================== VALIDACIONES ==================
 async def validar_contenido(update: Update, tipo: str):
     if tipo == "texto" and not update.message.text:
@@ -466,8 +466,8 @@ async def validar_flujo(update: Update, chat_id: int) -> bool:
     paso = ud.get("paso")
 
     if paso == 0 and not update.message.text:
-        await update.message.reply_text("✍️ Escribe el <b>nombre de tu cuadrilla</b>.👷‍♂️👷‍♀️\n\n""✏️ Recuerda ingresarlo como aparece en <b>PHOENIX</b>.\n\n"
-        "Ejemplo:\n\n <b>D 1 WIN SGA CHRISTOPHER INGA CONTRERAS</b>\n <b>D 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA</b> ✍️")
+        await update.message.reply_text("✍️ Escribe el nombre de tu cuadrilla.👷‍♂️👷‍♀️\n\n""✏️ Recuerda ingresarlo como aparece en PHOENIX.\n\n"
+        "Ejemplo:\n\n D 1 WIN SGA CHRISTOPHER INGA CONTRERAS\nD 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA<b> ✍️")
         return False
     
     if paso == "esperando_selfie_inicio" and not update.message.photo:
