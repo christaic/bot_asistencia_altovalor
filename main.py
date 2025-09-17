@@ -462,10 +462,18 @@ async def validar_flujo(update: Update, chat_id: int) -> bool:
             await update.message.reply_text("📍 Aquí solo debes compartir tu ubicación en tiempo real. 🔴")
             return False
 
-    # al final de validar_flujo
-    
-    if paso not in (0, "esperando_selfie_inicio", "esperando_live_inicio", "esperando_selfie_salida", "esperando_live_salida"):
-        await update.message.reply_text("⚠️ Ahora no puedes enviar este tipo de contenido, has excedido el limite de tiempo de espera ().\n\n Escribe nuevamente /start para reiniciar correctamente.")
+    # 🚦 Ajuste aquí:
+    if paso is None or paso == "finalizado":
+        # Ya terminó, no mostrar error
+        return False
+
+    if paso not in (0, "esperando_selfie_inicio", "esperando_live_inicio",
+                    "esperando_selfie_salida", "esperando_live_salida"):
+        await update.message.reply_text(
+            "⚠️ Este contenido no corresponde al paso actual.\n"
+            "Usa <b>/ayuda</b> si necesitas orientación.",
+            parse_mode="HTML"
+        )
         return False
     
     return True
@@ -1213,7 +1221,7 @@ def main():
     app.add_handler(CommandHandler("ayuda", ayuda))
     app.add_handler(CommandHandler("ingreso", ingreso))
     app.add_handler(CommandHandler("salida", salida))
-    app.add_handler(MessageHandler(filters.COMMAND, filtro_comandos_fuera_de_lugar), group=1)
+    app.add_handler(MessageHandler(filters.COMMAND & ~filters.Regex("^(start|ingreso|salida|ayuda)$"),filtro_comandos_fuera_de_lugar), group=1)
 
 
     # --- MENSAJES ---
