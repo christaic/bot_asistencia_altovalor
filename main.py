@@ -265,6 +265,26 @@ COL = {
     "LONGITUD SALIDA": "K",
 }
 
+PASOS = {
+    "esperando_cuadrilla": {
+        "mensaje": "✍️ Te falta escribir el <b>nombre de tu cuadrilla</b>."
+    },
+    "esperando_selfie_inicio": {
+        "mensaje": "📸 Te falta tu <b>foto de inicio</b>."
+    },
+    "esperando_live_inicio": {
+        "mensaje": "📍 Te falta tu <b>ubicación en tiempo real</b> de inicio."
+    },
+    "esperando_selfie_salida": {
+        "mensaje": "📸 Te falta tu <b>foto de salida</b>."
+    },
+    "esperando_live_salida": {
+        "mensaje": "📍 Te falta tu <b>ubicación en tiempo real</b> de salida."
+    },
+    "cerrado": {
+        "mensaje": "✅ Registro completado. No puedes iniciar otro hasta mañana."
+    }
+}
 def ensure_sheet_and_headers(spreadsheet_id: str):
     """Asegura pestaña SHEET_TITLE y fila 1 con HEADERS (y congela fila 1)."""
     meta = sheets_service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
@@ -995,35 +1015,76 @@ async def manejar_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"[ERROR] manejar_fotos: {e}")
 
-
-async def _upload_selfie_from_file_id(bot, file_id: str, filename: str, ssid: str, row: int, header: str) -> str:
-    """
-    Descarga una foto de Telegram, la comprime al 80%, la sube a Drive y la guarda en Google Sheets.
-    """
-    buff = io.BytesIO()
-    tg_file = await bot.get_file(file_id)
-    await tg_file.download_to_memory(out=buff)  # PTB v20
-    buff.seek(0)
-
-    # Usamos el helper centralizado
-    link = comprimir_y_subir(buff, filename, ssid, row, header)
-    return link
-
-
 #============= FUERA DE LUGAR ===========================
 
 async def filtro_comandos_fuera_de_lugar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+
     chat_id = update.effective_chat.id
+    text = update.message.text.strip()
+    command = text.lstrip("/").split()[0].lower()
     ud = user_data.get(chat_id, {})
 
-    if ud.get("paso") and ud.get("paso") not in (None, "finalizado"):
-        cmd = update.message.text
-        if cmd.startswith("/") and cmd not in ["/ayuda", "/salida"]:
+    # --- START e INGRESO ---
+    if command in ["start", "ingreso"]:
+        if not ud or not ud.get("row"):
+            if command == "ingreso":
+                # Aquí inicias el flujo normal
+                return await ingreso(update, context)
+            else:
+                await update.message.reply_text(
+                    "👋 Hola, para comenzar tu jornada usa el comando <b>/ingreso</b>.",
+                    parse_mode="HTML"
+                )
+            return
+
+        # Si ya hay flujo abierto → mostrar mensaje del paso pendiente
+        paso = ud.get("paso")
+        msg = PASOS.get(paso, {}).get("mensaje", "⚠️ Ya tienes un registro activo. Complétalo con /salida.")
+        await update.message.reply_text(msg, parse_mode="HTML")
+        return
+
+    # --- SALIDA ---
+    if command == "salida":
+        if not ud or not ud.get("row"):
             await update.message.reply_text(
-                "⚠️ No puedes usar este comando mientras tu registro está en curso.<br>"
-                "Usa solo <b>/salida</b> para finalizar o <b>/ayuda</b> si necesitas instrucciones.",
+                "⚠️ No puedes usar <b>/salida</b> sin antes iniciar con <b>/ingreso</b>.",
                 parse_mode="HTML"
             )
+            return
+
+        paso = ud.get("paso")
+        if paso in PASOS and paso not in ["esperando_selfie_salida", "esperando_live_salida"]:
+            msg = PASOS[paso]["mensaje"]
+            await update.message.reply_text(msg, parse_mode="HTML")
+            return
+
+        # Aquí ya está en el punto correcto para salida
+        return await salida(update, context)
+
+    # --- AYUDA ---
+    if command == "ayuda":
+        if not ud or not ud.get("row"):
+            await update.message.reply_text(
+                "ℹ️ Para comenzar tu jornada usa <b>/ingreso</b>.\n"
+                "Cuando termines, ciérrala con <b>/salida</b>.\n\n"
+                "Si necesitas soporte, escribe /ayuda .",
+                parse_mode="HTML"
+            )
+        else:
+            paso = ud.get("paso")
+            msg = PASOS.get(paso, {}).get("mensaje", "⚠️ Ya tienes un registro activo. Complétalo con /salida.")
+            await update.message.reply_text(msg, parse_mode="HTML")
+        return
+
+    # --- Otros comandos bloqueados ---
+    await update.message.reply_text(
+        "⚠️ Comando no permitido en este momento.\n"
+        "Usa <b>/ayuda</b> para más información.",
+        parse_mode="HTML"
+    )
+
 
 # ============= CONFIRMAR SELFIE INICIO & SALIDA =========
 
@@ -1052,7 +1113,16 @@ async def handle_confirmar_selfie_inicio(update: Update, context: ContextTypes.D
             return
         try:
             filename = f"selfie_inicio_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
-            link = await _upload_selfie_from_file_id(context.bot, fid, filename, ssid, row, "FOTO INICIO CUADRILLA")
+            tg_file = await context.bot.get_file(fid)
+            buff = io.BytesIO()
+            await tg_file.download_to_memory(out=buff)
+            buff.seek(0)
+
+            loop = asyncio.get_running_loop()
+            link = await loop.run_in_executor(
+                None,
+                lambda: comprimir_y_subir(buff, filename, ssid, row, "FOTO INICIO CUADRILLA")
+            )
 
             # Hora de ingreso
             hora = datetime.now(LIMA_TZ).strftime("%H:%M")
@@ -1072,52 +1142,75 @@ async def handle_confirmar_selfie_inicio(update: Update, context: ContextTypes.D
             logger.error(f"[ERROR] confirm_selfie_inicio upload: {e}")
             await query.edit_message_text("⚠️ No pude registra tu foto.\n Reintenta enviando tu foto nuevamente.")
 
-
 async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query or not es_chat_privado(update):
         return
+
     chat_id = query.message.chat.id
     ud = user_data.setdefault(chat_id, {})
+
     try:
         await query.answer()
     except Exception:
         pass
 
+    # --- Caso: repetir selfie ---
     if query.data == "repetir_selfie_salida":
         ud["pending_selfie_salida_file_id"] = None
         ud["paso"] = "esperando_selfie_salida"
-        await query.edit_message_text("🔄 Envía nuevamente tu *foto de salida*.", parse_mode="Markdown")
+        await query.edit_message_text(
+            "🔄 Envía nuevamente tu <b>selfie de salida</b>.",
+            parse_mode="HTML"
+        )
         return
 
+    # --- Caso: confirmar selfie ---
     if query.data == "confirmar_selfie_salida":
         ssid, row = ud.get("spreadsheet_id"), ud.get("row")
         fid = ud.get("pending_selfie_salida_file_id")
+
         if not (ssid and row and fid):
-            await query.edit_message_text("❌ Falta selfie o registro. Usa /salida para iniciar cierre.")
+            await query.edit_message_text("❌ Faltan fotos o registro. Usa /salida para iniciar cierre.")
             return
+
         try:
             filename = f"selfie_salida_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
-            link = await _upload_selfie_from_file_id(context.bot, fid, filename, ssid, row, "FOTO FIN CUADRILLA")
 
+            # Descargar de Telegram
+            tg_file = await context.bot.get_file(fid)
+            buff = io.BytesIO()
+            await tg_file.download_to_memory(out=buff)
+            buff.seek(0)
 
-            # Hora de salida
+            # Procesar (comprimir + subir a Drive) en un executor
+            loop = asyncio.get_running_loop()
+            link = await loop.run_in_executor(
+                None,
+                lambda: comprimir_y_subir(buff, filename, ssid, row, "FOTO FIN CUADRILLA")
+            )
+
+            # Registrar hora de salida
             hora = datetime.now(LIMA_TZ).strftime("%H:%M")
             update_single_cell(ssid, SHEET_TITLE, COL["HORA SALIDA"], row, hora)
 
+            # Avanzar paso
             ud["paso"] = "esperando_live_salida"
             ud["pending_selfie_salida_file_id"] = None
 
             await query.edit_message_text(
-                f"✅ Fotografía registrada. ⏱️ Hora de salida registrada: <b>{hora}</b>.\n\n"
-                "📍 Ahora envía tu <b>ubicación en tiempo real</b>\n\n(Elige “Compartir ubicación en tiempo real” 📍).",
+                f"✅ Fotografía registrada. ⏱️ Hora de salida: <b>{hora}</b>.\n\n"
+                "📍 Ahora envía tu <b>ubicación en tiempo real</b>\n\n"
+                "(Elige “Compartir ubicación en tiempo real” 📍).",
                 parse_mode="HTML"
             )
 
         except Exception as e:
             logger.error(f"[ERROR] confirm_selfie_salida upload: {e}")
-            await query.edit_message_text("⚠️ No pude subir la foto a Drive. Reenvíala, por favor.")
-
+            await query.edit_message_text(
+                "⚠️ No pude subir la foto a Drive.\n"
+                "Reenvíala, por favor."
+            )
 
 # ================== CALLBACKS / AYUDA (placeholder) ==================
 async def manejar_repeticiones(update: Update, context: ContextTypes.DEFAULT_TYPE):
