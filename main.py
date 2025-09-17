@@ -912,7 +912,15 @@ async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not es_chat_privado(update):
         return
     chat_id = update.effective_chat.id
-    ud = user_data.setdefault(chat_id, {})
+    ud = user_data.get(chat_id)   # 👈 usamos get, no setdefault
+
+    # 🚫 Si no hay jornada activa → bloquear directo
+    if not ud or not ud.get("spreadsheet_id") or not ud.get("row"):
+        await update.message.reply_text(
+            "⚠️ No puedes usar <b>/salida</b> sin antes iniciar con <b>/ingreso</b>.",
+            parse_mode="HTML"
+        )
+        return
 
     # 🚦 Validar pasos obligatorios antes de permitir salida
     if not ud.get("cuadrilla"):
