@@ -9,3 +9,5 @@ google-auth-oauthlib==1.2.1
 
 # Utilidades
 pytz==2024.2
+
+Pillow
