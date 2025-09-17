@@ -1033,30 +1033,7 @@ async def manejar_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def filtro_comandos_fuera_de_lugar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
-
-    chat_id = update.effective_chat.id
-    text = update.message.text.strip()
-    command = text.lstrip("/").split()[0].lower()
-    ud = user_data.get(chat_id, {})
-
-    # --- SALIDA ---
-    if command == "salida":
-        if not ud or not ud.get("row"):
-            await update.message.reply_text(
-                "⚠️ No puedes usar <b>/salida</b> sin antes iniciar con <b>/ingreso</b>.",
-                parse_mode="HTML"
-            )
-            return
-
-        paso = ud.get("paso")
-        if paso in PASOS and paso not in ["esperando_selfie_salida", "esperando_live_salida"]:
-            msg = PASOS[paso]["mensaje"]
-            await update.message.reply_text(msg, parse_mode="HTML")
-            return
-
-        # Aquí ya está en el punto correcto para salida
-        return await salida(update, context)
-    
+        
     # --- Otros comandos bloqueados ---
     await update.message.reply_text(
         "⚠️ Comando no permitido en este momento.\n"
@@ -1221,8 +1198,7 @@ def main():
     app.add_handler(CommandHandler("ayuda", ayuda))
     app.add_handler(CommandHandler("ingreso", ingreso))
     app.add_handler(CommandHandler("salida", salida))
-    app.add_handler(MessageHandler(filters.COMMAND & ~filters.Regex("^(start|ingreso|salida|ayuda)$"),filtro_comandos_fuera_de_lugar), group=1)
-
+    app.add_handler(MessageHandler(filters.COMMAND, filtro_comandos_fuera_de_lugar),group=1)
 
     # --- MENSAJES ---
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, nombre_cuadrilla))
