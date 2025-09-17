@@ -1,4 +1,5 @@
 import asyncio
+import psutil
 import unicodedata, re
 import os
 import io
@@ -206,32 +207,56 @@ def ensure_global_spreadsheet() -> str:
     return created["id"]
 
 # ---- Subida de imagen a Drive y enlace clicable ----
-def upload_image_and_get_link(image_bytes: io.BytesIO, filename: str) -> str:
+
+def upload_image_and_get_link(image_bytes: io.BytesIO, filename: str, max_retries: int = 3) -> str:
     """
     Sube una imagen a la carpeta IMAGENES y devuelve un enlace webViewLink.
-    Intenta poner permiso 'anyone with the link' como lector (si la política lo permite).
+    Usa subida fragmentada (resumable) con reintentos para evitar timeouts en Render.
     """
     image_bytes.seek(0)
-    media = MediaIoBaseUpload(image_bytes, mimetype="image/jpeg", resumable=False)
-    metadata = {"name": filename, "parents": [IMAGES_FOLDER_ID]}
-    
-    file = drive_service.files().create(
-        body=metadata,
-        media_body=media,
-        fields="id, webViewLink",
-        supportsAllDrives=True
-    ).execute()
-    file_id = file["id"]
-    try:
-        drive_service.permissions().create(
-            fileId=file_id,
-            body={"type": "anyone", "role": "reader"},
-            fields="id",
-            supportsAllDrives=True
-        ).execute()
-    except Exception as e:
-        logger.warning(f"[WARN] No se pudo abrir a 'cualquiera con el enlace': {e}. El link puede requerir acceso.")
-    return file.get("webViewLink")
+
+    for intento in range(max_retries):
+        try:
+            # Subida en chunks de 256 KB
+            media = MediaIoBaseUpload(
+                image_bytes,
+                mimetype="image/jpeg",
+                resumable=True,
+                chunksize=256 * 1024
+            )
+            metadata = {"name": filename, "parents": [IMAGES_FOLDER_ID]}
+
+            request = drive_service.files().create(
+                body=metadata,
+                media_body=media,
+                fields="id, webViewLink",
+                supportsAllDrives=True
+            )
+
+            response = None
+            while response is None:
+                status, response = request.next_chunk()
+                if status:
+                    logger.info(f"[UPLOAD] Progreso: {int(status.progress() * 100)}%")
+
+            file_id = response["id"]
+            try:
+                drive_service.permissions().create(
+                    fileId=file_id,
+                    body={"type": "anyone", "role": "reader"},
+                    fields="id",
+                    supportsAllDrives=True
+                ).execute()
+            except Exception as e:
+                logger.warning(f"[WARN] No se pudo abrir a 'cualquiera con el enlace': {e}. El link puede requerir acceso.")
+
+            return response.get("webViewLink")
+
+        except Exception as e:
+            logger.error(f"[UPLOAD] Error intento {intento+1}/{max_retries}: {e}")
+            if intento == max_retries - 1:
+                raise
+            import time; time.sleep(2 * (intento + 1))  # backoff exponencial
 
 # ================== GOOGLE SHEETS ==================
 SHEET_TITLE = "Registros"
@@ -424,13 +449,13 @@ async def init_bot_info(app):
 # ================== VALIDACIONES ==================
 async def validar_contenido(update: Update, tipo: str):
     if tipo == "texto" and not update.message.text:
-        await update.message.reply_text("⚠️ Debes enviar el *nombre de tu cuadrilla* en texto. ✍️")
+        await update.message.reply_text("⚠️ Debes enviar el nombre de tu cuadrilla en texto. ✍️")
         return False
     if tipo == "foto" and not update.message.photo:
-        await update.message.reply_text("⚠️ Debes enviar una *foto*, no texto. 🤳")
+        await update.message.reply_text("⚠️ Debes enviar una foto, no texto. 🤳")
         return False
     if tipo == "ubicacion" and not update.message.location:
-        await update.message.reply_text("📍 Por favor, envíame tu *ubicación actual en tiempo real* desde el clip ➜ Ubicación.")
+        await update.message.reply_text("📍 Por favor, envíame tu ubicación actual en tiempo real desde el clip ➜ Ubicación.")
         return False
     return True
 
@@ -441,7 +466,8 @@ async def validar_flujo(update: Update, chat_id: int) -> bool:
     paso = ud.get("paso")
 
     if paso == 0 and not update.message.text:
-        await update.message.reply_text("⚠️ Aquí solo debes escribir el *nombre de la cuadrilla*. ✍️")
+        await update.message.reply_text("✍️ Escribe el <b>nombre de tu cuadrilla</b>.👷‍♂️👷‍♀️\n\n""✏️ Recuerda ingresarlo como aparece en <b>PHOENIX</b>.\n\n"
+        "Ejemplo:\n\n <b>D 1 WIN SGA CHRISTOPHER INGA CONTRERAS</b>\n <b>D 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA</b> ✍️")
         return False
     
     if paso == "esperando_selfie_inicio" and not update.message.photo:
@@ -450,7 +476,7 @@ async def validar_flujo(update: Update, chat_id: int) -> bool:
     
     if paso == "esperando_live_inicio":
         if not update.message.location or not getattr(update.message.location, "live_period", None):
-            await update.message.reply_text("📍 Debes compartir tu ubicación en tiempo real.")
+            await update.message.reply_text("💪 Para continuar.\nDebes compartir tu ubicación en tiempo real. 📍")
             return False
 
     if paso == "esperando_selfie_salida" and not update.message.photo:
@@ -459,7 +485,7 @@ async def validar_flujo(update: Update, chat_id: int) -> bool:
     
     if paso == "esperando_live_salida":
         if not update.message.location or not getattr(update.message.location, "live_period", None):
-            await update.message.reply_text("📍 Aquí solo debes compartir tu ubicación en tiempo real. 🔴")
+            await update.message.reply_text("💪 Ya solo debes compartir tu ubicación en tiempo real. 📍")
             return False
 
     # 🚦 Ajuste aquí:
@@ -611,7 +637,9 @@ async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_
             ud["paso"] = 0
             ud["cuadrilla"] = ""
             await query.edit_message_text(
-                "✍️ <b>Escribe el nombre de tu cuadrilla 👷‍♂️ nuevamente.</b>",
+                "✍️ <b>Escribe el nombre de tu cuadrilla 👷‍♂️ nuevamente.\n"
+                "✏️ Recuerda ingresarlo como aparece en <b>PHOENIX</b>.\n\n"
+                "</b>Ejemplo:\n\n <b>D 1 WIN SGA CHRISTOPHER INGA CONTRERAS</b>\n""<b>D 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA</b>",
                 parse_mode="HTML"
             )
 
@@ -888,11 +916,11 @@ async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 🚦 Validar pasos obligatorios antes de permitir salida
     if not ud.get("cuadrilla"):
-        await update.message.reply_text("⚠️ No puedes registrar salida todavía. Te falta escribir el <b>nombre de la cuadrilla ✍️</b>", parse_mode="HTML")
+        await update.message.reply_text("⚠️ No puedes registrar salida todavía. Te falta escribir el <b>nombre de tu cuadrilla ✍️</b>", parse_mode="HTML")
         return 
 
     if not ud.get("hora_ingreso"):
-        await update.message.reply_text("⚠️ No puedes registrar salida todavía. Te falta tu <b>selfie de inicio 📸</b>", parse_mode="HTML")
+        await update.message.reply_text("⚠️ No puedes registrar salida todavía. Te falta tu <b>foto de inicio 📸</b>", parse_mode="HTML")
         return
     
     if ud.get("paso") in ("esperando_live_inicio", 0, "confirmar_selfie_inicio"):
@@ -1048,32 +1076,35 @@ async def handle_confirmar_selfie_inicio(update: Update, context: ContextTypes.D
     query = update.callback_query
     if not query or not es_chat_privado(update):
         return
+    
     chat_id = query.message.chat.id
     ud = user_data.setdefault(chat_id, {})
+
+    # ⚡ Contestamos de inmediato el callback
     try:
-        await query.answer()
+        await query.answer("Procesando foto de ingreso... ⏳")
     except Exception:
         pass
 
     if query.data == "repetir_selfie_inicio":
         ud["pending_selfie_inicio_file_id"] = None
         ud["paso"] = "esperando_selfie_inicio"
-        await query.edit_message_text("🔄 *Envía nuevamente tu foto de inicio de actividades.*", parse_mode="Markdown")
+        await query.edit_message_text("🔄 Envía nuevamente tu foto de inicio de actividades.\n""📸 Recuerda que debe ser con tus <b>EPPs completos</b>.", parse_mode="HTML")
         return
 
     if query.data == "confirmar_selfie_inicio":
         ssid, row = ud.get("spreadsheet_id"), ud.get("row")
         fid = ud.get("pending_selfie_inicio_file_id")
         if not (ssid and row and fid):
-            await query.edit_message_text("❌ *Falta foto de inicio de actividades.*")
+            await query.edit_message_text("❌ Falta foto de inicio de actividades.")
             return
         try:
-            filename = f"selfie_inicio_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
             tg_file = await context.bot.get_file(fid)
             buff = io.BytesIO()
             await tg_file.download_to_memory(out=buff)
             buff.seek(0)
-
+            filename = f"selfie_inicio_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
+            
             loop = asyncio.get_running_loop()
             link = await loop.run_in_executor(
                 None,
@@ -1087,7 +1118,12 @@ async def handle_confirmar_selfie_inicio(update: Update, context: ContextTypes.D
 
             # Pedir ubicación en tiempo real
             ud["paso"] = "esperando_live_inicio"
-            ud["pending_selfie_inicio_file_id"] = None
+
+            # 🧹 Limpiar memoria y medir
+            if "pending_selfie_inicio_file_id" in ud:
+                del ud["pending_selfie_inicio_file_id"]
+            gc.collect()
+            log_memoria("Después de confirmar Foto INICIO")
 
             await query.edit_message_text(
                 f"✅ Fotografía registrada. ⏱️ Hora de inicio: <b>{hora}</b>.\n\n"
@@ -1107,7 +1143,7 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
     ud = user_data.setdefault(chat_id, {})
 
     try:
-        await query.answer()
+        await query.answer("Procesando foto de salida... ⏳")
     except Exception:
         pass
 
@@ -1116,7 +1152,7 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
         ud["pending_selfie_salida_file_id"] = None
         ud["paso"] = "esperando_selfie_salida"
         await query.edit_message_text(
-            "🔄 Envía nuevamente tu <b>selfie de salida</b>.",
+            "🔄 Envía nuevamente tu <b>foto de salida</b>.",
             parse_mode="HTML"
         )
         return
@@ -1125,19 +1161,19 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
     if query.data == "confirmar_selfie_salida":
         ssid, row = ud.get("spreadsheet_id"), ud.get("row")
         fid = ud.get("pending_selfie_salida_file_id")
-
         if not (ssid and row and fid):
             await query.edit_message_text("❌ Faltan fotos o registro. Usa /salida para iniciar cierre.")
             return
 
         try:
-            filename = f"selfie_salida_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
 
             # Descargar de Telegram
             tg_file = await context.bot.get_file(fid)
             buff = io.BytesIO()
             await tg_file.download_to_memory(out=buff)
             buff.seek(0)
+
+            filename = f"selfie_salida_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
 
             # Procesar (comprimir + subir a Drive) en un executor
             loop = asyncio.get_running_loop()
@@ -1152,7 +1188,13 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
 
             # Avanzar paso
             ud["paso"] = "esperando_live_salida"
-            ud["pending_selfie_salida_file_id"] = None
+
+
+            # 🧹 Limpiar memoria y medir
+            if "pending_selfie_salida_file_id" in ud:
+                del ud["pending_selfie_salida_file_id"]
+            gc.collect()
+            log_memoria("Después de confirmar selfie SALIDA")
 
             await query.edit_message_text(
                 f"✅ Fotografía registrada. ⏱️ Hora de salida: <b>{hora}</b>.\n\n"
@@ -1167,6 +1209,14 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
                 "⚠️ No pude subir la foto a Drive.\n"
                 "Reenvíala, por favor."
             )
+
+#==================LOG RAM===========
+
+def log_memoria(contexto=""):
+    proceso = psutil.Process(os.getpid())
+    memoria_mb = proceso.memory_info().rss / 1024 / 1024  # en MB
+    logger.info(f"[MEMORIA] {contexto} -> {memoria_mb:.2f} MB")
+
 
 # ================== CALLBACKS / AYUDA (placeholder) ==================
 async def manejar_repeticiones(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1183,6 +1233,16 @@ async def handle_ayuda_callback(update: Update, context: ContextTypes.DEFAULT_TY
         "Comienza con /ingreso y sigue la secuencia para que tu asistencia se registre correctamente. ✅✅",
         parse_mode="HTML"
     )
+
+def subir_con_reintentos(buff, filename, ssid, row, header, intentos=3):
+    for i in range(intentos):
+        try:
+            return comprimir_y_subir(buff, filename, ssid, row, header)
+        except Exception as e:
+            logger.warning(f"[WARN] Falló intento {i+1}/{intentos} al subir {filename}: {e}")
+            if i == intentos - 1:
+                raise
+            import time; time.sleep(2 * (i+1))  # backoff exponencial
 
 
 # ================== MAIN ==================
