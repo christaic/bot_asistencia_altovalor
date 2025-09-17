@@ -1191,13 +1191,13 @@ def main():
     app.post_init = init_bot_info
 
     # --- DEBUG: atrapa cualquier callback primero ---
-    app.add_handler(CallbackQueryHandler(debug_callback_catcher, block=False), group=-1)
+    app.add_handler(CallbackQueryHandler(debug_callback_catcher), group=-1)
 
     # --- COMANDOS válidos ---
-    app.add_handler(CommandHandler("start", start), block=True)
-    app.add_handler(CommandHandler("ayuda", ayuda), block=True)
-    app.add_handler(CommandHandler("ingreso", ingreso), block=True)
-    app.add_handler(CommandHandler("salida", salida), block=True)
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("ayuda", ayuda))
+    app.add_handler(CommandHandler("ingreso", ingreso))
+    app.add_handler(CommandHandler("salida", salida))
 
     # --- COMANDOS inválidos (filtro general) ---
     app.add_handler(
