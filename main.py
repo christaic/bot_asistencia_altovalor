@@ -311,6 +311,38 @@ PASOS = {
         "mensaje": "✅ Registro completado. No puedes iniciar otro hasta mañana."
     }
 }
+
+# ================== BOTONERAS ==================
+def mostrar_botonera(paso: str) -> InlineKeyboardMarkup | None:
+    """
+    Devuelve la botonera correspondiente a un paso de confirmación.
+    """
+    if paso == "confirmar_nombre":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_nombre")],
+            [InlineKeyboardButton("✏️ Corregir", callback_data="corregir_nombre")],
+        ])
+
+    if paso == "confirmar_tipo":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_tipo")],
+            [InlineKeyboardButton("✏️ Corregir", callback_data="corregir_tipo")],
+        ])
+
+    if paso == "confirmar_selfie_inicio":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_selfie_inicio")],
+            [InlineKeyboardButton("🔄 Corregir", callback_data="repetir_selfie_inicio")],
+        ])
+
+    if paso == "confirmar_selfie_salida":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_selfie_salida")],
+            [InlineKeyboardButton("🔄 Corregir", callback_data="repetir_selfie_salida")],
+        ])
+
+    return None
+
 def ensure_sheet_and_headers(spreadsheet_id: str):
     """Asegura pestaña SHEET_TITLE y fila 1 con HEADERS (y congela fila 1)."""
     meta = sheets_service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
@@ -456,11 +488,19 @@ async def estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
     paso = ud.get("paso")
 
     if not paso or paso == "finalizado":
-        msg = "✅ No tienes ningún registro en curso. Usa /ingreso para comenzar."
-    else:
-        msg = f"📍 Actualmente estás en el paso: <b>{PASOS.get(paso, {}).get('mensaje', paso)}</b>"
+        msg = "✅ No tienes ningún registro en curso 👀.\nUsa /ingreso para comenzar.💪"
+        await update.message.reply_text(msg, parse_mode="HTML")
+        return
 
+    # Mensaje del paso actual
+    msg = f"📍 Actualmente estás en el paso: <b>{PASOS.get(paso, {}).get('mensaje', paso)}</b>"
     await update.message.reply_text(msg, parse_mode="HTML")
+
+    # Mostrar botones si el paso corresponde
+    kb = mostrar_botonera(paso)
+    if kb:
+        await update.message.reply_text("👇 Selecciona una opción para continuar:", reply_markup=kb)
+
 
 # ================== VALIDACIONES ==================
 async def validar_contenido(update: Update, tipo: str):
@@ -537,6 +577,18 @@ async def validar_flujo(update: Update, chat_id: int) -> bool:
             parse_mode="HTML"
         )
         return False
+    
+     # 🔒 Si el paso requiere botones → bloquear texto/fotos/ubicación hasta que responda
+    if paso in ("confirmar_nombre", "confirmar_tipo", "confirmar_selfie_inicio", "confirmar_selfie_salida"):
+        kb = mostrar_botonera(paso)
+        if kb:
+            await update.message.reply_text(
+                "⚠️ Usa los botones para confirmar o corregir. 👇",
+                reply_markup=kb,
+                parse_mode="HTML"
+            )
+        return False   
+
 
     return True
 
@@ -649,14 +701,13 @@ async def nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     ud["cuadrilla"] = update.message.text.strip()
-    keyboard = [
-        [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_nombre")],
-        [InlineKeyboardButton("✏️ Corregir ", callback_data="corregir_nombre")],
-    ]
+    
+    ud["paso"] = "confirmar_nombre"
+    ud["botones_activos"] = ["confirmar_nombre", "corregir_nombre"]
     await update.message.reply_text(
-        f"¿Has ingresado correctamente el nombre de tu cuadrilla 👷‍♂️? 🤔🤔\n\n<b>{ud['cuadrilla']}</b>\n\n¿Es correcto?",
+        f"¿Has ingresado correctamente el nombre de tu cuadrilla 👷‍♂️? 🤔\n\n<b>{ud['cuadrilla']}</b>",
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        reply_markup=mostrar_botonera("confirmar_nombre")
     )
 
 async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -667,13 +718,20 @@ async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_
     chat_id = query.message.chat.id
     ud = user_data.setdefault(chat_id, {})
 
+    # ⚡ Solo aceptar si está en los botones activos
+
+    if query.data not in ud.get("botones_activos", []):
+        await query.answer("⚠️ Este botón ya no es válido.")
+        return
+
     try:
         # feedback para confirmar que el callback llegó
-        await query.answer("Creando registro…")
+        await query.answer("Procesando…")
 
         if query.data == "corregir_nombre":
             ud["paso"] = 0
             ud["cuadrilla"] = ""
+            ud.pop("botones_activos", None)   # limpiar
             await query.edit_message_text(
                 "✍️ <b>Escribe el nombre de tu cuadrilla 👷‍♂️ nuevamente.\n"
                 "✏️ Recuerda ingresarlo como aparece en <b>PHOENIX</b>.\n\n"
@@ -684,6 +742,7 @@ async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_
         if query.data == "confirmar_nombre":
             if not ud.get("cuadrilla"):
                 ud["paso"] = 0
+                ud.pop("botones_activos", None)   # limpiar
                 await query.edit_message_text("⚠️ No encontré el nombre. Escríbelo y confirma.")
                 return
 
@@ -702,13 +761,14 @@ async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_
 
             # 3) Avanza a tipo de cuadrilla
             ud["paso"] = "tipo"
+            ud.pop("botones_activos", None)   # limpiar
             keyboard = [
                 [InlineKeyboardButton("🟠 DISPONIBILIDAD", callback_data="tipo_disp")],
                 [InlineKeyboardButton("⚪ REGULAR", callback_data="tipo_reg")],
             ]
             await query.edit_message_text(
-                "Selecciona el *tipo de cuadrilla*:",
-                parse_mode="Markdown",
+                "Selecciona el <b>tipo de cuadrilla</b>:",
+                parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
 
@@ -716,8 +776,8 @@ async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_
         logger.exception("[handle_nombre_cuadrilla] Error")
         try:
             await query.message.reply_text(
-                "❌ Ocurrió un error creando el registro en Google Drive/Sheets.\n"
-                "Vuelve a intentar con /ingreso. Revisa los logs en Render para más detalle."
+                "❌ Ocurrió un error.\n"
+                "Escribe /estado para poder indicarte en que paso te encuentras."
             )
         except Exception:
             pass
@@ -756,14 +816,14 @@ async def handle_tipo_cuadrilla(update: Update, context: ContextTypes.DEFAULT_TY
     ud["tipo_seleccionado"] = seleccion
     ud["paso"] = "confirmar_tipo"
 
-    k = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_tipo")],
-        [InlineKeyboardButton("✏️ Corregir", callback_data="corregir_tipo")],
-    ])
+    # Guardamos los botones activos válidos en este estado
+    ud["botones_activos"] = ["confirmar_tipo", "corregir_tipo"]
+
+    kb = mostrar_botonera("confirmar_tipo")
     await query.edit_message_text(
         f"Seleccionaste: <b>{seleccion}</b>.\n\n¿Es correcto?",
         parse_mode="HTML",
-        reply_markup=k
+        reply_markup=kb
     )
 
 # ====================== CORREGIR TIPO O CONFIRMAR ===========
@@ -1060,46 +1120,38 @@ async def manejar_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 🚦 Validación: solo aceptar FOTO en este paso
         if not await validar_flujo(update, chat_id):
             return
-
-        if update.message.reply_to_message:
-            if update.message.reply_to_message.message_id == user_data.get(chat_id, {}).get("msg_id_motivador"):
-                return
+        
+        ud = user_data.setdefault(chat_id, {})
 
         # Selfie de INICIO -> capturamos y pedimos confirmación
         if paso == "esperando_selfie_inicio":
             photo = update.message.photo[-1]
-            ud = user_data.setdefault(chat_id, {})
             ud["pending_selfie_inicio_file_id"] = photo.file_id
             ud["paso"] = "confirmar_selfie_inicio"
-            k = InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_selfie_inicio")],
-                [InlineKeyboardButton("🔄 Corregir", callback_data="repetir_selfie_inicio")],
-            ])
-            await update.message.reply_text("¿Usamos esta foto para iniciar actividades?\n\n ⚠️ Importante: Despues de brindar la confirmación.\n\n ⏳ Debemos esperar como minimo 8 seg. para continuar.", reply_markup=k)
+            ud["botones_activos"] = ["confirmar_selfie_inicio", "repetir_selfie_inicio"]
+
+            await update.message.reply_text("¿📸Usamos esta foto para iniciar actividades?", reply_markup=("confirmar_selfie_inicio"))
             return
 
-        # Selfie de SALIDA -> capturamos y pedimos confirmación
+        # Selfie de SALIDA
         if paso == "esperando_selfie_salida":
             photo = update.message.photo[-1]
-            ud = user_data.setdefault(chat_id, {})
             ud["pending_selfie_salida_file_id"] = photo.file_id
             ud["paso"] = "confirmar_selfie_salida"
-            k = InlineKeyboardMarkup([
+            ud["botones_activos"] = ["confirmar_selfie_salida", "repetir_selfie_salida"]
+
+            kb = InlineKeyboardMarkup([
                 [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_selfie_salida")],
-                [InlineKeyboardButton("🔄 Corregir", callback_data="repetir_selfie_salida")],
+                [InlineKeyboardButton("🔄 Repetir", callback_data="repetir_selfie_salida")]
             ])
-            await update.message.reply_text("¿Usamos esta foto para finalizar actividades?\n\n ⚠️ Importante: Despues de brindar la confirmación.\n\n ⏳ Debemos esperar como minimo 8 seg. para finalizar tu registro.", reply_markup=k)
+            await update.message.reply_text("¿📸Usamos esta foto para finalizar actividades?", reply_markup=kb)
             return
 
-        # Flujo viejo (por si llega foto fuera de lugar)
-        if paso == 1:
-            await foto_ingreso(update, context)  # si aún usas este camino
-        elif paso == 2:
-            await foto_ats(update, context)      # si aún usas ATS en tu versión
-        elif paso == "selfie_salida":
-            await selfie_salida(update, context)
-        else:
-            await update.message.reply_text("⚠️ No es momento de enviar fotos.\n\n Usa /ingreso para comenzar.")
+        # Caso: foto fuera de lugar
+        await update.message.reply_text(
+            "⚠️ No es momento de enviar fotos.\n Usa /estado para ver en que paso estas."
+        )
+
     except Exception as e:
         logger.error(f"[ERROR] manejar_fotos: {e}")
 
@@ -1127,31 +1179,37 @@ async def handle_confirmar_selfie_inicio(update: Update, context: ContextTypes.D
     chat_id = query.message.chat.id
     ud = user_data.setdefault(chat_id, {})
 
-    # ⚡ Contestamos de inmediato el callback
-    try:
-        await query.answer("Procesando foto de ingreso... ⏳")
-    except Exception:
-        pass
-
-    if query.data == "repetir_selfie_inicio":
-        ud["pending_selfie_inicio_file_id"] = None
-        ud["paso"] = "esperando_selfie_inicio"
-        await query.edit_message_text("🔄 Envía nuevamente tu foto de inicio de actividades.\n""📸 Recuerda que debe ser con tus <b>EPPs completos</b>.", parse_mode="HTML")
+    # ⚡ Solo aceptar botones activos
+    if query.data not in ud.get("botones_activos", []):
+        await query.answer("⚠️ Este botón ya no es válido.")
         return
 
-    if query.data == "confirmar_selfie_inicio":
-        ssid, row = ud.get("spreadsheet_id"), ud.get("row")
-        fid = ud.get("pending_selfie_inicio_file_id")
-        if not (ssid and row and fid):
-            await query.edit_message_text("❌ Falta foto de inicio de actividades.")
+    # ⚡ Contestamos de inmediato el callback
+
+    try:
+        await query.answer("Procesando foto de ingreso... ⏳")
+
+        if query.data == "repetir_selfie_inicio":
+            ud["pending_selfie_inicio_file_id"] = None
+            ud["paso"] = "esperando_selfie_inicio"
+            ud.pop("botones_activos", None)
+            await query.edit_message_text("🔄 Envía nuevamente tu foto de inicio de actividades.\n""📸 Recuerda que debe ser con tus <b>EPPs completos</b>.", parse_mode="HTML")
             return
-        try:
+
+        if query.data == "confirmar_selfie_inicio":
+            ssid, row = ud.get("spreadsheet_id"), ud.get("row")
+            fid = ud.get("pending_selfie_inicio_file_id")
+            if not (ssid and row and fid):
+                ud.pop("botones_activos", None)
+                await query.edit_message_text("❌ Falta foto de inicio de actividades.")
+                return
+    
             tg_file = await context.bot.get_file(fid)
             buff = io.BytesIO()
             await tg_file.download_to_memory(out=buff)
             buff.seek(0)
+
             filename = f"selfie_inicio_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
-            
             loop = asyncio.get_running_loop()
             link = await loop.run_in_executor(
                 None,
@@ -1165,7 +1223,9 @@ async def handle_confirmar_selfie_inicio(update: Update, context: ContextTypes.D
 
             # Pedir ubicación en tiempo real
             ud["paso"] = "esperando_live_inicio"
-
+            ud.pop("botones_activos", None)  # limpiar
+            del ud["pending_selfie_inicio_file_id"]
+        
             # 🧹 Limpiar memoria y medir
             if "pending_selfie_inicio_file_id" in ud:
                 del ud["pending_selfie_inicio_file_id"]
@@ -1177,9 +1237,11 @@ async def handle_confirmar_selfie_inicio(update: Update, context: ContextTypes.D
                 "📍 Ahora envía tu <b>ubicación en tiempo real</b>\n\n(Elige “Compartir ubicación en tiempo real” 📍).",
                 parse_mode="HTML"
             )
-        except Exception as e:
-            logger.error(f"[ERROR] confirm_selfie_inicio upload: {e}")
-            await query.edit_message_text("⚠️ No pude registra tu foto.\n Reintenta enviando tu foto nuevamente.")
+        
+    except Exception as e:
+        logger.error(f"[ERROR] confirm_selfie_inicio upload: {e}")
+        await query.edit_message_text("⚠️ No pude registra tu foto.\n Reintenta enviando tu foto nuevamente.")
+        
 
 async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
