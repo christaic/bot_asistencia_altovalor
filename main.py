@@ -445,6 +445,21 @@ async def init_bot_info(app):
 
     logger.info(f"Bot iniciado como {BOT_USERNAME}")
 
+#====================== ESTADO
+
+async def estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not es_chat_privado(update):
+        return
+    chat_id = update.effective_chat.id
+    ud = user_data.get(chat_id, {})
+    paso = ud.get("paso")
+
+    if not paso or paso == "finalizado":
+        msg = "✅ No tienes ningún registro en curso. Usa /ingreso para comenzar."
+    else:
+        msg = f"📍 Actualmente estás en el paso: <b>{PASOS.get(paso, {}).get('mensaje', paso)}</b>"
+
+    await update.message.reply_text(msg, parse_mode="HTML")
 
 # ================== VALIDACIONES ==================
 async def validar_contenido(update: Update, tipo: str):
@@ -493,11 +508,13 @@ async def validar_flujo(update: Update, chat_id: int) -> bool:
         # Ya terminó, no mostrar error
         return False
 
+    # 🔽 AQUI VA EL BLOQUE QUE ME MOSTRASTE 🔽
     if paso not in (0, "esperando_selfie_inicio", "esperando_live_inicio",
                     "esperando_selfie_salida", "esperando_live_salida"):
         await update.message.reply_text(
-            "⚠️ Este contenido no corresponde al paso actual.\n"
-            "Usa <b>/ayuda</b> si necesitas orientación.",
+            f"⚠️ Este contenido no corresponde al paso actual.\n\n"
+            f"📍 Paso en curso: <b>{PASOS.get(paso, {}).get('mensaje', paso)}</b>\n"
+            "Usa /ayuda si necesitas orientación.",
             parse_mode="HTML"
         )
         return False
@@ -1280,6 +1297,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, nombre_cuadrilla))
     app.add_handler(MessageHandler(filters.PHOTO, manejar_fotos))
     app.add_handler(MessageHandler(filters.LOCATION, manejar_ubicacion))
+    app.add_handler(CommandHandler("estado", estado))
 
     # --- CALLBACKS REALES ---
     app.add_handler(CallbackQueryHandler(handle_ayuda_callback, pattern="^ayuda$"))
