@@ -1130,6 +1130,11 @@ async def manejar_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ud["paso"] = "confirmar_selfie_inicio"
             ud["botones_activos"] = ["confirmar_selfie_inicio", "repetir_selfie_inicio"]
 
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_selfie_inicio")],
+                [InlineKeyboardButton("🔄 Repetir", callback_data="repetir_selfie_inicio")]
+            ])
+
             await update.message.reply_text("¿📸Usamos esta foto para iniciar actividades?", reply_markup=("confirmar_selfie_inicio"))
             return
 
@@ -1260,8 +1265,9 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
     if query.data == "repetir_selfie_salida":
         ud["pending_selfie_salida_file_id"] = None
         ud["paso"] = "esperando_selfie_salida"
+        ud.pop("botones_activos", None) 
         await query.edit_message_text(
-            "🔄 Envía nuevamente tu <b>foto de salida</b>.",
+            "🔄 Envía nuevamente tu <b>foto de salida</b> 📸",
             parse_mode="HTML"
         )
         return
@@ -1271,7 +1277,7 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
         ssid, row = ud.get("spreadsheet_id"), ud.get("row")
         fid = ud.get("pending_selfie_salida_file_id")
         if not (ssid and row and fid):
-            await query.edit_message_text("❌ Faltan fotos o registro. Usa /salida para iniciar cierre.")
+            await query.edit_message_text("❌ Falta tu foto de salida 👀")
             return
 
         try:
@@ -1283,7 +1289,6 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
             buff.seek(0)
 
             filename = f"selfie_salida_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
-
             # Procesar (comprimir + subir a Drive) en un executor
             loop = asyncio.get_running_loop()
             link = await loop.run_in_executor(
@@ -1294,6 +1299,7 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
             # Registrar hora de salida
             hora = datetime.now(LIMA_TZ).strftime("%H:%M")
             update_single_cell(ssid, SHEET_TITLE, COL["HORA SALIDA"], row, hora)
+            ud["hora_salida"] = hora
 
             # Avanzar paso
             ud["paso"] = "esperando_live_salida"
@@ -1315,8 +1321,7 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
         except Exception as e:
             logger.error(f"[ERROR] confirm_selfie_salida upload: {e}")
             await query.edit_message_text(
-                "⚠️ No pude subir la foto a Drive.\n"
-                "Reenvíala, por favor."
+                "⚠️ No pude registrar tu foto de salida.\nReintenta enviadola de nuevo."
             )
 
 #==================LOG RAM===========
