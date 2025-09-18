@@ -292,19 +292,20 @@ COL = {
 
 PASOS = {
     "esperando_cuadrilla": {
-        "mensaje": "✍️ Te falta escribir el nombre de tu cuadrilla."
+        "mensaje": "✍️ Escribe el nombre de tu cuadrilla.👷‍♂️👷‍♀️\n\n""✏️ Recuerda ingresarlo como aparece en PHOENIX.\n\n"
+        "Ejemplo:\n\n D 1 WIN SGA CHRISTOPHER INGA CONTRERAS\n\nD 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA ✍️"
     },
     "esperando_selfie_inicio": {
-        "mensaje": "📸 Te falta tu foto de inicio."
+        "mensaje": "📸 Aquí solo debes enviar tu foto de inicio. 🤳""
     },
     "esperando_live_inicio": {
-        "mensaje": "📍 Te falta tu ubicación en tiempo real de inicio."
+        "mensaje": "💪 Para continuar.\nDebes compartir tu ubicación en tiempo real. 📍"
     },
     "esperando_selfie_salida": {
-        "mensaje": "📸 Te falta tu foto de salida."
+        "mensaje": "📸 Aquí solo debes enviar tu foto de salida. 🤳""
     },
     "esperando_live_salida": {
-        "mensaje": "📍 Te falta tu ubicación en tiempo real de salida."
+        "mensaje": "💪 Para finalizar, debes compartir tu ubicación en tiempo real. 📍"
     },
     "cerrado": {
         "mensaje": "✅ Registro completado. No puedes iniciar otro hasta mañana."
@@ -480,45 +481,63 @@ async def validar_flujo(update: Update, chat_id: int) -> bool:
     ud = user_data.get(chat_id, {})
     paso = ud.get("paso")
 
-    if paso == 0 and not update.message.text:
-        await update.message.reply_text("✍️ Escribe el nombre de tu cuadrilla.👷‍♂️👷‍♀️\n\n""✏️ Recuerda ingresarlo como aparece en PHOENIX.\n\n"
-        "Ejemplo:\n\n D 1 WIN SGA CHRISTOPHER INGA CONTRERAS\n\nD 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA ✍️")
-        return False
-    
-    if paso == "esperando_selfie_inicio" and not update.message.photo:
-        await update.message.reply_text("📸 Aquí solo debes enviar tu foto de inicio. 🤳")
-        return False
-    
-    if paso == "esperando_live_inicio":
-        if not update.message.location or not getattr(update.message.location, "live_period", None):
-            await update.message.reply_text("💪 Para continuar.\nDebes compartir tu ubicación en tiempo real. 📍")
-            return False
-
-    if paso == "esperando_selfie_salida" and not update.message.photo:
-        await update.message.reply_text("📸 Aquí solo debes enviar tu foto de salida. 🤳")
-        return False
-    
-    if paso == "esperando_live_salida":
-        if not update.message.location or not getattr(update.message.location, "live_period", None):
-            await update.message.reply_text("💪 Ya solo debes compartir tu ubicación en tiempo real. 📍")
-            return False
-
-    # 🚦 Ajuste aquí:
+        # 🚦 Si ya terminó
     if paso is None or paso == "finalizado":
-        # Ya terminó, no mostrar error
-        return False
-
-    # 🔽 AQUI VA EL BLOQUE QUE ME MOSTRASTE 🔽
-    if paso not in (0, "esperando_selfie_inicio", "esperando_live_inicio",
-                    "esperando_selfie_salida", "esperando_live_salida"):
         await update.message.reply_text(
-            f"⚠️ Este contenido no corresponde al paso actual.\n\n"
-            f"📍 Paso en curso: <b>{PASOS.get(paso, {}).get('mensaje', paso)}</b>\n"
-            "Usa /ayuda si necesitas orientación.",
+            "✅ Ya completaste tu registro hoy. \n\nMañana podrás iniciar uno nuevo con /ingreso.💪💪",
             parse_mode="HTML"
         )
         return False
+
+    # Paso 0 → solo texto
+    if paso == 0 and not update.message.text:
+        await update.message.reply_text(
+            PASOS["esperando_cuadrilla"]["mensaje"], parse_mode="HTML"
+        )
+        return False
     
+    # Selfie inicio → solo foto
+    if paso == "esperando_selfie_inicio" and not update.message.photo:
+        await update.message.reply_text(
+            PASOS["esperando_selfie_inicio"]["mensaje"], parse_mode="HTML"
+        )
+        return False
+
+    # Ubicación inicio → solo live location
+    if paso == "esperando_live_inicio":
+        if not update.message.location or not getattr(update.message.location, "live_period", None):
+            await update.message.reply_text(
+                PASOS["esperando_live_inicio"]["mensaje"], parse_mode="HTML"
+            )
+            return False
+
+    # Selfie salida → solo foto
+    if paso == "esperando_selfie_salida" and not update.message.photo:
+        await update.message.reply_text(
+            PASOS["esperando_selfie_salida"]["mensaje"], parse_mode="HTML"
+        )
+        return False
+
+    # Ubicación salida → solo live location
+    if paso == "esperando_live_salida":
+        if not update.message.location or not getattr(update.message.location, "live_period", None):
+            await update.message.reply_text(
+                PASOS["esperando_live_salida"]["mensaje"], parse_mode="HTML"
+            )
+            return False
+
+    # Cualquier otro contenido fuera de lugar
+    if paso not in (0, "esperando_selfie_inicio", "esperando_live_inicio",
+                    "esperando_selfie_salida", "esperando_live_salida",
+                    "confirmar_nombre", "confirmar_tipo",
+                    "confirmar_selfie_inicio", "confirmar_selfie_salida"):
+        await update.message.reply_text(
+            f"⚠️ Este contenido no corresponde al paso actual.\n\n"
+            f"📍 Paso en curso: <b>{PASOS.get(paso, {}).get('mensaje', paso)}</b>",
+            parse_mode="HTML"
+        )
+        return False
+
     return True
 
 
@@ -569,6 +588,8 @@ async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
 2️⃣ Usa /salida para tu Fin de jornada laboral 👷‍♂️:  
    - Envia la foto de fin de actividades 📸  
    - Ubicación en tiempo real 📍  
+
+ℹ️ Usa /estado para ver el paso en el que te encuentras 💪
 
 ‼️ El flujo es estricto, no puedes saltarte pasos. 🧐\n
 
@@ -1039,6 +1060,7 @@ async def manejar_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 🚦 Validación: solo aceptar FOTO en este paso
         if not await validar_flujo(update, chat_id):
             return
+
         if update.message.reply_to_message:
             if update.message.reply_to_message.message_id == user_data.get(chat_id, {}).get("msg_id_motivador"):
                 return
