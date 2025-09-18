@@ -1117,7 +1117,7 @@ async def manejar_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_id = update.effective_chat.id
         paso = user_data.get(chat_id, {}).get("paso")
         
-    # 🚦 Validación: solo aceptar FOTO en este paso
+        # 🚦 Validación: solo aceptar FOTO en este paso
         if not await validar_flujo(update, chat_id):
             return
         
@@ -1134,11 +1134,10 @@ async def manejar_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_selfie_inicio")],
                 [InlineKeyboardButton("🔄 Repetir", callback_data="repetir_selfie_inicio")]
             ])
-
-            await update.message.reply_text("¿📸Usamos esta foto para iniciar actividades?", reply_markup=("confirmar_selfie_inicio"))
+            await update.message.reply_text("¿📸Usamos esta foto para iniciar actividades?", reply_markup=kb)
             return
 
-        # Selfie de SALIDA
+        # Selfie de SALIDA -> capturamos y pedimos confirmación
         if paso == "esperando_selfie_salida":
             photo = update.message.photo[-1]
             ud["pending_selfie_salida_file_id"] = photo.file_id
@@ -1154,11 +1153,12 @@ async def manejar_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Caso: foto fuera de lugar
         await update.message.reply_text(
-            "⚠️ No es momento de enviar fotos.\n Usa /estado para ver en que paso estas."
+            "⚠️ No es momento de enviar fotos.\n Usa /estado para ver en qué paso estás."
         )
 
     except Exception as e:
         logger.error(f"[ERROR] manejar_fotos: {e}")
+
 
 #============= FUERA DE LUGAR ===========================
 
