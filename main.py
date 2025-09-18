@@ -296,13 +296,13 @@ PASOS = {
         "Ejemplo:\n\n D 1 WIN SGA CHRISTOPHER INGA CONTRERAS\n\nD 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA ✍️"
     },
     "esperando_selfie_inicio": {
-        "mensaje": "📸 Aquí solo debes enviar tu foto de inicio. 🤳""
+        "mensaje": "📸 Aquí solo debes enviar tu foto de inicio. 🤳"
     },
     "esperando_live_inicio": {
         "mensaje": "💪 Para continuar.\nDebes compartir tu ubicación en tiempo real. 📍"
     },
     "esperando_selfie_salida": {
-        "mensaje": "📸 Aquí solo debes enviar tu foto de salida. 🤳""
+        "mensaje": "📸 Aquí solo debes enviar tu foto de salida. 🤳"
     },
     "esperando_live_salida": {
         "mensaje": "💪 Para finalizar, debes compartir tu ubicación en tiempo real. 📍"
