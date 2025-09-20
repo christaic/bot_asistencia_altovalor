@@ -312,6 +312,13 @@ PASOS = {
     }
 }
 
+
+def dentro_horario_laboral() -> bool:
+    """True si la hora actual está dentro de 07:00 - 23:30 Lima."""
+    ahora = datetime.now(LIMA_TZ).time()
+    return datetime.strptime("07:00", "%H:%M").time() <= ahora <= datetime.strptime("23:30", "%H:%M").time()
+
+
 # ================== BOTONERAS ==================
 def mostrar_botonera(paso: str) -> InlineKeyboardMarkup | None:
     """
@@ -433,6 +440,29 @@ def append_base_row(spreadsheet_id: str, data: dict) -> int:
         body={"values": row}
     ).execute()
     return _parse_row_from_updated_range(resp["updates"]["updatedRange"])
+
+
+def find_active_row(spreadsheet_id: str, cuadrilla: str, tipo: str) -> int | None:
+    """
+    Busca la fila más reciente en Sheets para una cuadrilla+tipo
+    que aún no tenga salida registrada.
+    """
+    vr = sheets_service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"{SHEET_TITLE}!A2:K",  # columnas A→K
+    ).execute()
+
+    values = vr.get("values", [])
+    for i, row in enumerate(values, start=2):  # fila 2 en adelante
+        cuadra = row[1] if len(row) > 1 else ""
+        tipo_c = row[2] if len(row) > 2 else ""
+        hora_salida = row[7] if len(row) > 7 else ""  # Col H = HORA SALIDA
+
+        if cuadra == cuadrilla and tipo_c == tipo and not hora_salida:
+            return i  # número de fila encontrada
+
+    return None
+
 
 def gs_set_by_header(spreadsheet_id: str, row: int, header: str, value):
     col = COL[header]
@@ -655,6 +685,15 @@ async def ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     chat_id = update.effective_chat.id
     ud = user_data.get(chat_id, {})
+
+        # 🚦 Validar horario laboral
+    if not dentro_horario_laboral():
+        await update.message.reply_text(
+            "⚠️ Solo puedes registrar tu asistencia entre las <b>07:00 AM y 11:30 PM</b>.",
+            parse_mode="HTML"
+        )
+        return
+
 
     # 🚦 1. Si ya está en medio de un registro y no ha hecho salida, no permitir nuevo ingreso
     if ud.get("paso") not in (None, "finalizado"):
@@ -956,8 +995,15 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     ud = user_data.setdefault(chat_id, {})
-    ssid, row = ud.get("spreadsheet_id"), ud.get("row")
-    if not ssid or not row:
+    ssid = ud.get("spreadsheet_id")
+    cuadrilla, tipo = ud.get("cuadrilla"), ud.get("tipo")
+    if not ssid or not cuadrilla or not tipo:
+        return
+
+    # Buscar la fila activa en Sheets (más robusto que confiar solo en RAM)
+    row = find_active_row(ssid, cuadrilla, tipo)
+    if not row:
+        await update.message.reply_text("⚠️ Tuvimos un problema. Usa /ingreso para iniciar de nuevo.")
         return
 
     loc = update.message.location
@@ -989,7 +1035,7 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if ud.get("paso") == "esperando_live_salida":
         update_single_cell(ssid, SHEET_TITLE, COL["LATITUD SALIDA"], row, f"{lat:.6f}")
         update_single_cell(ssid, SHEET_TITLE, COL["LONGITUD SALIDA"], row, f"{lon:.6f}")
-        ud["paso"] = None
+        ud["paso"] = "finalizado"
         user_data[chat_id] = ud
 
         # ✅ Marcar registro como completo (excepto usuarios de prueba)
@@ -1038,12 +1084,25 @@ async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Ya completaste tu registro hoy. No puedes registrar otra salida.")
         return
     
+    # 🚦 Validar horario laboral
+    if not dentro_horario_laboral():
+        await update.message.reply_text(
+            "⚠️ Solo puedes registrar tu <b>salida</b> entre las <b>07:00 AM y 11:30 PM</b>.",
+            parse_mode="HTML"
+        )
+        return 
+
     # ✅ Si cumplió con lo mínimo → permitir selfie de salida
-    ssid, row = ud.get("spreadsheet_id"), ud.get("row")
-    if not ssid or not row:
-        await update.message.reply_text("⚠️ No hay jornada activa. Usa /ingreso para iniciar.")
+    ssid = ud.get("spreadsheet_id")
+    cuadrilla = ud.get("cuadrilla")
+    tipo = ud.get("tipo")
+
+    row = find_active_row(ssid, cuadrilla, tipo)
+    if not row:
+        await update.message.reply_text("⚠️ No encontré tu registro activo. ¿Seguro que hiciste /ingreso?")
         return
-    
+
+    ud["row"] = row
     ud["paso"] = "esperando_selfie_salida"
     await update.message.reply_text("📸 Envía tu foto de <b>fin de labores con tus EPPs completos</b>.\n Para finalizar tu jornada. 🏠", parse_mode="HTML")
 
@@ -1051,15 +1110,26 @@ async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def selfie_salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     ud = user_data.get(chat_id) or {}
+
+    # 🚦 Validar paso actual
+
     if ud.get("paso") != "selfie_salida":
         return
     if not await validar_contenido(update, "foto"):
         return
 
-    ssid, row = ud.get("spreadsheet_id"), ud.get("row")
+    ssid = ud.get("spreadsheet_id")
+    cuadrilla = ud.get("cuadrilla")
+    tipo = ud.get("tipo")
+
+    # ✅ Buscar la fila activa de cuadrilla+tipo que no tenga salida
+    row = find_active_row(ssid, cuadrilla, tipo)
     if not ssid or not row:
         await update.message.reply_text("❌ No hay registro activo. Usa /ingreso para iniciar.")
         return
+        
+    ud["row"] = row
+
 
     # 1) Descargar a memoria
     photo = update.message.photo[-1]
@@ -1317,6 +1387,9 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
                 "(Elige “Compartir ubicación en tiempo real” 📍).",
                 parse_mode="HTML"
             )
+
+    if chat_id not in USUARIOS_TEST:
+        marcar_registro_completo(chat_id)
 
         except Exception as e:
             logger.error(f"[ERROR] confirm_selfie_salida upload: {e}")
