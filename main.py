@@ -573,7 +573,8 @@ async def estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    msg = PASOS.get(paso, {}).get("mensaje", "⚠️ Tienes un registro activo pendiente.")
+    msg = PASOS.get(paso, {}).get("mensaje", "Aquí debes escribir el nombre de tu cuadrilla.👷‍♂️👷‍♀️\n\n""✏️ Recuerda ingresarlo como aparece en PHOENIX.\n\n"
+        "Ejemplo:\n\n D 1 WIN SGA CHRISTOPHER INGA CONTRERAS\nD 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA")
     kb = mostrar_botonera(paso)
 
     if kb:
