@@ -1189,14 +1189,6 @@ async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Ya completaste tu registro hoy. No puedes registrar otra salida.")
         return
     
-    # 🚦 Validar horario laboral
-    if not dentro_horario_laboral():
-        await update.message.reply_text(
-            "⚠️ Solo puedes registrar tu <b>salida</b> entre las <b>07:00 AM y 11:30 PM</b>.",
-            parse_mode="HTML"
-        )
-        return 
-
     # ✅ Si cumplió con lo mínimo → permitir selfie de salida
     ssid = ud.get("spreadsheet_id")
     cuadrilla = ud.get("cuadrilla")
