@@ -53,7 +53,12 @@ def comprimir_y_subir(buff: io.BytesIO, filename: str, ssid: str, row: int, head
 
         # Subir a Drive
         link = upload_image_and_get_link(compressed, filename)
-        gs_set_by_header(ssid, row, header, link)
+        col = COL.get(header)
+        if col:
+            update_single_cell(ssid, SHEET_TITLE, col, row, link)
+        else:
+            logger.error(f"[ERROR] Header '{header}' no encontrado en COL")
+
 
         # Liberar RAM del comprimido
         compressed.close()
@@ -1303,28 +1308,39 @@ async def handle_confirmar_selfie_inicio(update: Update, context: ContextTypes.D
 
     try:
         await query.answer("Procesando foto de ingreso... ⏳")
+    except Exception:
+        pass
 
-        if query.data == "repetir_selfie_inicio":
-            ud["pending_selfie_inicio_file_id"] = None
-            ud["paso"] = "esperando_selfie_inicio"
-            ud.pop("botones_activos", None)
+    if query.data == "repetir_selfie_inicio":
+        ud["pending_selfie_inicio_file_id"] = None
+        ud["paso"] = "esperando_selfie_inicio"
+        ud.pop("botones_activos", None)
+
+        try:
             await query.edit_message_text("🔄 Envía nuevamente tu foto de inicio de actividades.\n""📸 Recuerda que debe ser con tus <b>EPPs completos</b>.", parse_mode="HTML")
+            
+        except Exception as e:
+            if "Message is not modified" in str(e):
+                logger.warning(f"[handle_confirmar_selfie_inicio] Botón repetido ignorado (chat_id={chat_id})")
+            else:
+                raise
+        return
+                
+    if query.data == "confirmar_selfie_inicio":
+        ssid, id_registro = ud.get("spreadsheet_id"), ud.get("id_registro")
+        fid = ud.get("pending_selfie_inicio_file_id")
+        if not (ssid and id_registro and fid):
+            ud.pop("botones_activos", None)
+            await query.edit_message_text("❌ Falta foto de inicio de actividades.")
             return
 
-        if query.data == "confirmar_selfie_inicio":
-            ssid, id_registro = ud.get("spreadsheet_id"), ud.get("id_registro")
-            fid = ud.get("pending_selfie_inicio_file_id")
-            if not (ssid and id_registro and fid):
-                ud.pop("botones_activos", None)
-                await query.edit_message_text("❌ Falta foto de inicio de actividades.")
-                return
+        # ✅ Buscar la fila por ID_REGISTRO
+        row = find_active_row(ssid, id_registro)
+        if not row:
+            await query.edit_message_text("⚠️ No encontré tu registro activo.")
+            return
 
-            # ✅ Buscar la fila por ID_REGISTRO
-            row = find_active_row(ssid, id_registro)
-            if not row:
-                await query.edit_message_text("⚠️ No encontré tu registro activo.")
-                return
-
+        try:
             tg_file = await context.bot.get_file(fid)
             buff = io.BytesIO()
             await tg_file.download_to_memory(out=buff)
@@ -1332,7 +1348,6 @@ async def handle_confirmar_selfie_inicio(update: Update, context: ContextTypes.D
 
             filename = f"selfie_inicio_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
             loop = asyncio.get_running_loop()
-
             link = await loop.run_in_executor(
                 None,
                 lambda: comprimir_y_subir(buff, filename, ssid, row, "FOTO INICIO CUADRILLA")
@@ -1351,22 +1366,27 @@ async def handle_confirmar_selfie_inicio(update: Update, context: ContextTypes.D
             # Pedir ubicación en tiempo real
             ud["paso"] = "esperando_live_inicio"
             ud.pop("botones_activos", None)  # limpiar botones activos
+            ud.pop("pending_selfie_inicio_file_id", None)
 
-            # 🧹 Limpiar memoria y medir
-            if "pending_selfie_inicio_file_id" in ud:
-                del ud["pending_selfie_inicio_file_id"]
             gc.collect()
             log_memoria("Después de confirmar Foto INICIO")
 
-            await query.edit_message_text(
+            try:
+                await query.edit_message_text(
                 f"✅ Fotografía registrada. ⏱️ Hora de inicio: <b>{hora}</b>.\n\n"
                 "📍 Ahora envía tu <b>ubicación en tiempo real</b>\n\n(Elige “Compartir ubicación en tiempo real” 📍).",
                 parse_mode="HTML"
-            )
-        
-    except Exception as e:
-        logger.error(f"[ERROR] confirm_selfie_inicio upload: {e}")
-        await query.edit_message_text("⚠️ No pude registra tu foto.\n Reintenta enviando tu foto nuevamente.")
+                )
+
+            except Exception as e:
+                if "Message is not modified" in str(e):
+                    logger.warning(f"[handle_confirmar_selfie_inicio] Mensaje repetido ignorado (chat_id={chat_id})")
+                else:
+                    raise  
+
+        except Exception as e:
+            logger.error(f"[ERROR] confirm_selfie_inicio upload: {e}")
+            await query.edit_message_text("⚠️ No pude registra tu foto.\n Reintenta enviando tu foto nuevamente.")
         
 
 
@@ -1392,11 +1412,18 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
     if query.data == "repetir_selfie_salida":
         ud["pending_selfie_salida_file_id"] = None
         ud["paso"] = "esperando_selfie_salida"
-        ud.pop("botones_activos", None) 
-        await query.edit_message_text(
-            "🔄 Envía nuevamente tu <b>foto de salida</b> 📸",
-            parse_mode="HTML"
-        )
+        ud.pop("botones_activos", None)
+
+        try:
+            await query.edit_message_text(
+                "🔄 Envía nuevamente tu <b>foto de salida</b> 📸",
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            if "Message is not modified" in str(e):
+                logger.warning(f"[handle_confirmar_selfie_salida] Botón repetido ignorado (chat_id={chat_id})")
+            else:
+                raise
         return
 
     # --- Caso: confirmar selfie ---
@@ -1407,15 +1434,14 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
             await query.edit_message_text("❌ Falta tu foto de salida 👀")
             return
 
+        # ✅ Buscar la fila real por ID_REGISTRO
+
+        row = find_active_row(ssid, id_registro)
+        if not row:
+            await query.edit_message_text("⚠️ No encontré tu registro activo.")
+            return
+        
         try:
-
-            # ✅ Buscar la fila real por ID_REGISTRO
-
-            row = find_active_row(ssid, id_registro)
-            if not row:
-                await query.edit_message_text("⚠️ No encontré tu registro activo.")
-                return
-
             # Descargar de Telegram
             tg_file = await context.bot.get_file(fid)
             buff = io.BytesIO()
@@ -1446,6 +1472,7 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
             # Avanzar paso
             ud["paso"] = "esperando_live_salida"
             ud.pop("botones_activos", None)  # limpiar botones activos
+            ud.pop("pending_selfie_salida_file_id", None)
 
 
             # 🧹 Limpiar memoria y medir
@@ -1455,12 +1482,21 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
             gc.collect()
             log_memoria("Después de confirmar selfie SALIDA")
 
-            await query.edit_message_text(
-                f"✅ Fotografía registrada. ⏱️ Hora de salida: <b>{hora}</b>.\n\n"
-                "📍 Ahora envía tu <b>ubicación en tiempo real</b>\n\n"
-                "(Elige “Compartir ubicación en tiempo real” 📍).",
-                parse_mode="HTML"
-            )
+            try:
+
+                await query.edit_message_text(
+                    f"✅ Fotografía registrada. ⏱️ Hora de salida: <b>{hora}</b>.\n\n"
+                    "📍 Ahora envía tu <b>ubicación en tiempo real</b>\n\n"
+                    "(Elige “Compartir ubicación en tiempo real” 📍).",
+                    parse_mode="HTML"
+                )
+                
+            except Exception as e:
+                if "Message is not modified" in str(e):
+                    logger.warning(f"[handle_confirmar_selfie_salida] Mensaje repetido ignorado (chat_id={chat_id})")
+                else:
+                    raise
+
 
             # 🚦 Aquí va la marca de finalización (solo si no es usuario de prueba)
 
