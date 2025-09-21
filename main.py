@@ -1,5 +1,5 @@
+import uuid
 import asyncio
-import psutil
 import unicodedata, re
 import os
 import io
@@ -53,6 +53,10 @@ def comprimir_y_subir(buff: io.BytesIO, filename: str, ssid: str, row: int, head
     except Exception as e:
         logger.error(f"[ERROR] comprimir_y_subir: {e}")
         raise
+
+
+def log_memoria(contexto=""):
+    logger.info(f"[MEMORIA] {contexto}")
 
 # Control de registros diarios (chat_id -> fecha último registro finalizado)
 
@@ -263,6 +267,8 @@ SHEET_TITLE = "Registros"
 
 # Cabezera sin "MES"; columnas para URL de selfies
 HEADERS = [
+    "ID_REGISTRO",
+    "USER_ID",
     "FECHA",
     "CUADRILLA",
     "TIPO DE CUADRILLA",   # Disponibilidad | Regular
@@ -277,38 +283,53 @@ HEADERS = [
 ]
 
 COL = {
-    "FECHA": "A",
-    "CUADRILLA": "B",
-    "TIPO DE CUADRILLA": "C",
-    "FOTO INICIO CUADRILLA": "D",
-    "LATITUD": "E",
-    "LONGITUD": "F",
-    "HORA INGRESO": "G",
-    "HORA SALIDA": "H",
-    "FOTO FIN CUADRILLA": "I",
-    "LATITUD SALIDA": "J",
-    "LONGITUD SALIDA": "K",
+    "ID_REGISTRO": "A",
+    "USER_ID": "B",                 # 👈 Nueva columna
+    "FECHA": "C",
+    "CUADRILLA": "D",
+    "TIPO DE CUADRILLA": "E",
+    "FOTO INICIO CUADRILLA": "F",
+    "LATITUD": "G",
+    "LONGITUD": "H",
+    "HORA INGRESO": "I",
+    "HORA SALIDA": "J",
+    "FOTO FIN CUADRILLA": "K",
+    "LATITUD SALIDA": "L",
+    "LONGITUD SALIDA": "M",
 }
+
 
 PASOS = {
     "esperando_cuadrilla": {
-        "mensaje": "✍️ Escribe el nombre de tu cuadrilla.👷‍♂️👷‍♀️\n\n""✏️ Recuerda ingresarlo como aparece en PHOENIX.\n\n"
-        "Ejemplo:\n\n D 1 WIN SGA CHRISTOPHER INGA CONTRERAS\n\nD 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA ✍️"
+        "mensaje": "🧐🧐 Aquí debes escribir el nombre de tu cuadrilla.👷‍♂️👷‍♀️\n\n""✏️ Recuerda ingresarlo como aparece en PHOENIX.\n\n"
+        "Ejemplo:\n\n D 1 WIN SGA CHRISTOPHER INGA CONTRERAS\nD 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA"
+    },
+    "confirmar_nombre": {
+        "mensaje": "👉 Confirma o corrige el nombre de tu cuadrilla usando los botones."
     },
     "esperando_selfie_inicio": {
-        "mensaje": "📸 Aquí solo debes enviar tu foto de inicio. 🤳"
+        "mensaje": "📸 Aquí solo debes enviar tu foto de inicio con tus EPPs completos. 👷‍♂️👷‍♀️"
+    },
+    "confirmar_selfie_inicio": {
+        "mensaje": "👉 Confirma o corrige la foto de inicio usando los botones."
     },
     "esperando_live_inicio": {
-        "mensaje": "💪 Para continuar.\nDebes compartir tu ubicación en tiempo real. 📍"
+        "mensaje": "📍 Comparte tu ubicación en tiempo real para continuar. 💪"
+    },
+    "en_jornada": {
+        "mensaje": "🚀 Estás en jornada. Usa /salida para registrar tu fin de labores."
     },
     "esperando_selfie_salida": {
-        "mensaje": "📸 Aquí solo debes enviar tu foto de salida. 🤳"
+        "mensaje": "📸 Aquí solo debes enviar tu foto de salida con tus EPPs completos. 👷‍♂️👷‍♀️"
+    },
+    "confirmar_selfie_salida": {
+        "mensaje": "👉 Confirma o corrige la foto de salida usando los botones."
     },
     "esperando_live_salida": {
-        "mensaje": "💪 Para finalizar, debes compartir tu ubicación en tiempo real. 📍"
+        "mensaje": "📍 Comparte tu ubicación en tiempo real para finalizar tu jornada. 💪"
     },
-    "cerrado": {
-        "mensaje": "✅ Registro completado. No puedes iniciar otro hasta mañana."
+    "finalizado": {
+        "mensaje": "✅✅ Registro completado.\nNos vemos mañana crack. 🤝🤝👷‍♂️👷‍♀️"
     }
 }
 
@@ -318,37 +339,6 @@ def dentro_horario_laboral() -> bool:
     ahora = datetime.now(LIMA_TZ).time()
     return datetime.strptime("07:00", "%H:%M").time() <= ahora <= datetime.strptime("23:30", "%H:%M").time()
 
-
-# ================== BOTONERAS ==================
-def mostrar_botonera(paso: str) -> InlineKeyboardMarkup | None:
-    """
-    Devuelve la botonera correspondiente a un paso de confirmación.
-    """
-    if paso == "confirmar_nombre":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_nombre")],
-            [InlineKeyboardButton("✏️ Corregir", callback_data="corregir_nombre")],
-        ])
-
-    if paso == "confirmar_tipo":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_tipo")],
-            [InlineKeyboardButton("✏️ Corregir", callback_data="corregir_tipo")],
-        ])
-
-    if paso == "confirmar_selfie_inicio":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_selfie_inicio")],
-            [InlineKeyboardButton("🔄 Corregir", callback_data="repetir_selfie_inicio")],
-        ])
-
-    if paso == "confirmar_selfie_salida":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_selfie_salida")],
-            [InlineKeyboardButton("🔄 Corregir", callback_data="repetir_selfie_salida")],
-        ])
-
-    return None
 
 def ensure_sheet_and_headers(spreadsheet_id: str):
     """Asegura pestaña SHEET_TITLE y fila 1 con HEADERS (y congela fila 1)."""
@@ -413,24 +403,29 @@ def _parse_row_from_updated_range(updated_range: str) -> int:
     a1 = tail.split(":")[0]  # "A2"
     return int(re.findall(r"\d+", a1)[0])
 
-def append_base_row(spreadsheet_id: str, data: dict) -> int:
+def append_base_row(spreadsheet_id: str, data: dict, chat_id: int) -> int:
     """
     Inserta nueva fila base y devuelve el número de fila insertada.
     """
     ahora = datetime.now(LIMA_TZ)
+    id_registro = str(uuid.uuid4())
+    
     payload = {
+        "ID_REGISTRO": id_registro,
+        "USER_ID": str(chat_id),
         "FECHA": ahora.strftime("%Y-%m-%d"),
         "CUADRILLA": data.get("CUADRILLA", ""),
         "TIPO DE CUADRILLA": data.get("TIPO DE CUADRILLA", ""),
         "FOTO INICIO CUADRILLA": "",
         "LATITUD": "",
         "LONGITUD": "",
-        "HORA INGRESO": "",
+        "HORA INGRESO": data.get ("HORA INGRESO", ""),
         "HORA SALIDA": "",
         "FOTO FIN CUADRILLA": "",
         "LATITUD SALIDA": "",
         "LONGITUD SALIDA": "",
     }
+
     row = [[payload.get(h, "") for h in HEADERS]]
     resp = sheets_service.spreadsheets().values().append(
         spreadsheetId=spreadsheet_id,
@@ -439,34 +434,43 @@ def append_base_row(spreadsheet_id: str, data: dict) -> int:
         insertDataOption="INSERT_ROWS",
         body={"values": row}
     ).execute()
-    return _parse_row_from_updated_range(resp["updates"]["updatedRange"])
+
+    row_num = _parse_row_from_updated_range(resp["updates"]["updatedRange"])
+
+    # Guardar en memoria
+    ud = user_data.setdefault(chat_id, {})
+    ud["id_registro"] = id_registro
+    ud["row"] = row_num
+    ud["spreadsheet_id"] = spreadsheet_id
+
+    return row_num
 
 
-def find_active_row(spreadsheet_id: str, cuadrilla: str, tipo: str) -> int | None:
+#=============== ID USUARIO ==================
+
+def find_active_row(spreadsheet_id: str, id_registro: str) -> int | None:
     """
-    Busca la fila más reciente en Sheets para una cuadrilla+tipo
-    que aún no tenga salida registrada.
+    Busca en Google Sheets la fila que contiene el ID_REGISTRO dado.
+    Devuelve el número de fila (int) o None si no existe.
     """
-    vr = sheets_service.spreadsheets().values().get(
-        spreadsheetId=spreadsheet_id,
-        range=f"{SHEET_TITLE}!A2:K",  # columnas A→K
-    ).execute()
+    try:
+        resp = sheets_service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=f"{SHEET_TITLE}!A:A",  # Columna A: donde está ID_REGISTRO
+        ).execute()
 
-    values = vr.get("values", [])
-    for i, row in enumerate(values, start=2):  # fila 2 en adelante
-        cuadra = row[1] if len(row) > 1 else ""
-        tipo_c = row[2] if len(row) > 2 else ""
-        hora_salida = row[7] if len(row) > 7 else ""  # Col H = HORA SALIDA
+        values = resp.get("values", [])
+        for idx, row in enumerate(values, start=1):
+            if row and row[0] == id_registro:  # Col A contiene ID_REGISTRO
+                return idx
 
-        if cuadra == cuadrilla and tipo_c == tipo and not hora_salida:
-            return i  # número de fila encontrada
+    except Exception as e:
+        logger.error(f"[ERROR] find_active_row({id_registro}): {e}")
 
     return None
 
 
-def gs_set_by_header(spreadsheet_id: str, row: int, header: str, value):
-    col = COL[header]
-    set_cell_value(spreadsheet_id, SHEET_TITLE, f"{col}{row}", value)
+
 
 # ================== ESTADO EN MEMORIA ==================
 
@@ -508,28 +512,58 @@ async def init_bot_info(app):
 
     logger.info(f"Bot iniciado como {BOT_USERNAME}")
 
-#====================== ESTADO
+
+#================= MUESTRA BOTONERA SEGUN PASO ===============
+
+def mostrar_botonera(paso: str):
+
+    if paso == "confirmar_nombre":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_nombre")],
+            [InlineKeyboardButton("✏️ Corregir", callback_data="corregir_nombre")]
+        ])
+    
+    if paso == "confirmar_tipo":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🟠 DISPONIBILIDAD", callback_data="tipo_disp")],
+            [InlineKeyboardButton("⚪ REGULAR", callback_data="tipo_reg")]
+        ])
+    
+    if paso == "confirmar_selfie_inicio":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_selfie_inicio")],
+            [InlineKeyboardButton("🔄 Repetir", callback_data="repetir_selfie_inicio")]
+        ])
+    
+    if paso == "confirmar_selfie_salida":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_selfie_salida")],
+            [InlineKeyboardButton("🔄 Repetir", callback_data="repetir_selfie_salida")]
+        ])
+    
+    return None
+
+#====================== ESTADO =================
 
 async def estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not es_chat_privado(update):
-        return
     chat_id = update.effective_chat.id
     ud = user_data.get(chat_id, {})
     paso = ud.get("paso")
 
     if not paso or paso == "finalizado":
-        msg = "✅ No tienes ningún registro en curso 👀.\nUsa /ingreso para comenzar.💪"
-        await update.message.reply_text(msg, parse_mode="HTML")
+        await update.message.reply_text(
+            "⚠️ No tienes un registro activo.\nUsa /ingreso para iniciar tu jornada.",
+            parse_mode="HTML"
+        )
         return
 
-    # Mensaje del paso actual
-    msg = f"📍 Actualmente estás en el paso: <b>{PASOS.get(paso, {}).get('mensaje', paso)}</b>"
-    await update.message.reply_text(msg, parse_mode="HTML")
-
-    # Mostrar botones si el paso corresponde
+    msg = PASOS.get(paso, {}).get("mensaje", "⚠️ Tienes un registro activo pendiente.")
     kb = mostrar_botonera(paso)
+
     if kb:
-        await update.message.reply_text("👇 Selecciona una opción para continuar:", reply_markup=kb)
+        await update.message.reply_text(msg, parse_mode="HTML", reply_markup=kb)
+    else:
+        await update.message.reply_text(msg, parse_mode="HTML")
 
 
 # ================== VALIDACIONES ==================
@@ -596,6 +630,17 @@ async def validar_flujo(update: Update, chat_id: int) -> bool:
             )
             return False
 
+     # 🔒 Si el paso requiere botones → bloquear texto/fotos/ubicación hasta que responda
+    if paso in ("confirmar_nombre", "confirmar_tipo", "confirmar_selfie_inicio", "confirmar_selfie_salida"):
+        kb = mostrar_botonera(paso)
+        if kb:
+            await update.message.reply_text(
+                "⚠️ Usa los botones para confirmar o corregir. 👇",
+                reply_markup=kb,
+                parse_mode="HTML"
+            )
+        return False  
+
     # Cualquier otro contenido fuera de lugar
     if paso not in (0, "esperando_selfie_inicio", "esperando_live_inicio",
                     "esperando_selfie_salida", "esperando_live_salida",
@@ -608,18 +653,6 @@ async def validar_flujo(update: Update, chat_id: int) -> bool:
         )
         return False
     
-     # 🔒 Si el paso requiere botones → bloquear texto/fotos/ubicación hasta que responda
-    if paso in ("confirmar_nombre", "confirmar_tipo", "confirmar_selfie_inicio", "confirmar_selfie_salida"):
-        kb = mostrar_botonera(paso)
-        if kb:
-            await update.message.reply_text(
-                "⚠️ Usa los botones para confirmar o corregir. 👇",
-                reply_markup=kb,
-                parse_mode="HTML"
-            )
-        return False   
-
-
     return True
 
 
@@ -634,7 +667,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if ud.get("paso") and ud.get("paso") not in (None, "finalizado"):
         paso = ud.get("paso")
         msg = PASOS.get(paso, {}).get(
-            "mensaje", "⚠️ Ya tienes un registro en curso. Complétalo con /salida."
+            "mensaje", "⚠️ Ya tienes un registro en curso.\nPara ver el estado de tu registro presiona:\n🆘 /estado para ayudarte en que paso te encuentras o\n 🛫 /salida para finalizar jornada."
         )
         await update.message.reply_text(msg, parse_mode="HTML")
         return
@@ -650,7 +683,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = []
 
     await update.message.reply_text(
-        "👋👋 ¡Hola! Bienvenido al bot asistencia SGA - WIN 👷‍♂️👷‍♂️.\n\n" + comandos,
+        "👋👋 ¡Hola! Bienvenido al bot de asistencia SGA - WIN 👷‍♂️👷‍♂️.\n\n" + comandos,
         parse_mode="HTML",
     )
 
@@ -659,7 +692,7 @@ async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     texto = """
-👋 👋 ¡Hola! Bienvenido al bot asistencia SGA - WIN 👷‍♂️👷‍♂️\n\n
+👋 👋 ¡Hola! Bienvenido al bot de asistencia SGA - WIN 👷‍♂️👷‍♂️\n\n
 ℹ️ Instrucciones para uso del bot:
 
 1️⃣ Usa /ingreso para registrar tu Inicio de jornada laboral 👷‍♂️ .  
@@ -699,7 +732,7 @@ async def ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if ud.get("paso") not in (None, "finalizado"):
         paso = ud.get("paso")
         msg = PASOS.get(paso, {}).get(
-            "mensaje", "⚠️ Ya tienes un registro en curso. Complétalo con /salida."
+            "mensaje", "⚠️ Ya tienes un registro en curso.\nPara ver el estado de tu registro presiona:\n🆘 /estado para ayudarte en que paso te encuentras o\n 🛫 /salida para finalizar jornada."
         )
         await update.message.reply_text(msg, parse_mode="HTML")
         return
@@ -715,7 +748,7 @@ async def ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ✅ 3. Caso válido: iniciar nuevo flujo
     user_data[chat_id] = {"paso": 0}
     await update.message.reply_text(
-        "✍️ Escribe el <b>nombre de tu cuadrilla</b>.👷‍♂️👷‍♀️\n\n"
+        "✍️ Hola, escribe el <b>nombre de tu cuadrilla</b>.👷‍♂️👷‍♀️\n\n"
         "✏️ Recuerda ingresarlo como aparece en <b>PHOENIX</b>.\n\n"
         "Ejemplo:\n\n <b>D 1 WIN SGA CHRISTOPHER INGA CONTRERAS</b>\n <b>D 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA</b>",
         parse_mode="HTML"
@@ -772,7 +805,7 @@ async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_
             ud["cuadrilla"] = ""
             ud.pop("botones_activos", None)   # limpiar
             await query.edit_message_text(
-                "✍️ <b>Escribe el nombre de tu cuadrilla 👷‍♂️ nuevamente.\n"
+                "✍️ <b>Hola, escribe el nombre de tu cuadrilla 👷‍♂️ nuevamente.\n"
                 "✏️ Recuerda ingresarlo como aparece en <b>PHOENIX</b>.\n\n"
                 "</b>Ejemplo:\n\n <b>D 1 WIN SGA CHRISTOPHER INGA CONTRERAS</b>\n""<b>D 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA</b>",
                 parse_mode="HTML"
@@ -923,14 +956,22 @@ async def foto_ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     chat_id = update.effective_chat.id
     ud = user_data.get(chat_id) or {}
-    if ud.get("paso") != 1:
+
+    if ud.get("paso") != "esperando_selfie_inicio":
         return
+
     if not await validar_contenido(update, "foto"):
         return
 
-    ssid, row = ud.get("spreadsheet_id"), ud.get("row")
-    if not ssid or not row:
+    ssid, id_registro = ud.get("spreadsheet_id"), ud.get("id_registro")
+    if not ssid or not id_registro:
         await update.message.reply_text("❌ No hay registro activo. Usa /ingreso para iniciar.")
+        return
+
+    # ✅ Buscar la fila por ID_REGISTRO
+    row = find_active_row(ssid, id_registro)
+    if not row:
+        await update.message.reply_text("⚠️ No encontré tu registro activo. Usa /ingreso para comenzar de nuevo.")
         return
 
     # 1) Descargar la foto de Telegram a memoria
@@ -949,7 +990,7 @@ async def foto_ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
         buff.seek(0)
     except Exception as e:
         logger.error(f"[ERROR] Descargando foto TG (inicio): {e}")
-        await update.message.reply_text("⚠️ No pude leer la foto desde Telegram. Reenvíala, por favor.")
+        await update.message.reply_text("⚠️ No pude procesar tu fotografía.\nReenvíala, por favor.")
         return
 
     # 2) Comprimir, subir y guardar link en el Sheet
@@ -973,7 +1014,7 @@ async def foto_ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
         hora
     )
     ud["hora_ingreso"] = hora
-    ud["paso"] = 2
+    ud["paso"] = "esperando_live_inicio"
     user_data[chat_id] = ud
 
     await update.message.reply_text(
@@ -996,18 +1037,19 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     ud = user_data.setdefault(chat_id, {})
     ssid = ud.get("spreadsheet_id")
-    cuadrilla, tipo = ud.get("cuadrilla"), ud.get("tipo")
-    if not ssid or not cuadrilla or not tipo:
+    id_registro = ud.get("id_registro")
+    if not ssid or not id_registro:
         return
 
     # Buscar la fila activa en Sheets (más robusto que confiar solo en RAM)
-    row = find_active_row(ssid, cuadrilla, tipo)
+    row = find_active_row(ssid, id_registro)
     if not row:
         await update.message.reply_text("⚠️ Tuvimos un problema. Usa /ingreso para iniciar de nuevo.")
         return
 
     loc = update.message.location
     lat, lon = loc.latitude, loc.longitude
+
     is_live = bool(getattr(loc, "live_period", None))
 
     # Exigir live-location (no aceptar ubicación estática)
@@ -1019,7 +1061,7 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Ubicación de INICIO
-    if ud.get("paso") in ("esperando_live_inicio", 2):
+    if ud.get("paso") == "esperando_live_inicio":
         update_single_cell(ssid, SHEET_TITLE, COL["LATITUD"], row, f"{lat:.6f}")
         update_single_cell(ssid, SHEET_TITLE, COL["LONGITUD"], row, f"{lon:.6f}")
         ud["paso"] = "en_jornada"   # jornada abierta hasta /salida
@@ -1027,7 +1069,7 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             "✅ Ubicación de inicio registrada.\n\n"
-            "Recuerda que para concluir tu jornada debes usar /salida."
+            "💭 Recuerda que para concluir tu jornada debes usar /salida."
         )
         return
 
@@ -1044,7 +1086,7 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await update.message.reply_text(
             "✅ Ubicación de salida registrada.\n\n"
-            "<b> 👷‍♂️🦺 Salida registrada. Que tengas un buen regreso a casa. 🏠 </b>",
+            "<b> 👷‍♂️🦺 Salida registrada. \nQue tengas un buen regreso a casa. 🏠 </b>",
             parse_mode="HTML"
         )
 
@@ -1059,9 +1101,9 @@ async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ud = user_data.get(chat_id)   # 👈 usamos get, no setdefault
 
     # 🚫 Si no hay jornada activa → bloquear directo
-    if not ud or not ud.get("spreadsheet_id") or not ud.get("row"):
+    if not ud or not ud.get("spreadsheet_id") or not ud.get("id_registro"):
         await update.message.reply_text(
-            "⚠️ No puedes usar <b>/salida</b> sin antes iniciar con <b>/ingreso</b>.",
+            "⚠️ No puedes usar <b>/salida</b> sin antes haber completado tu registro de <b>/ingreso</b>.",
             parse_mode="HTML"
         )
         return
@@ -1097,7 +1139,7 @@ async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cuadrilla = ud.get("cuadrilla")
     tipo = ud.get("tipo")
 
-    row = find_active_row(ssid, cuadrilla, tipo)
+    row = find_active_row(ssid, ud.get("id_registro"))
     if not row:
         await update.message.reply_text("⚠️ No encontré tu registro activo. ¿Seguro que hiciste /ingreso?")
         return
@@ -1107,96 +1149,35 @@ async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📸 Envía tu foto de <b>fin de labores con tus EPPs completos</b>.\n Para finalizar tu jornada. 🏠", parse_mode="HTML")
 
 
-async def selfie_salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    ud = user_data.get(chat_id) or {}
-
-    # 🚦 Validar paso actual
-
-    if ud.get("paso") != "selfie_salida":
-        return
-    if not await validar_contenido(update, "foto"):
-        return
-
-    ssid = ud.get("spreadsheet_id")
-    cuadrilla = ud.get("cuadrilla")
-    tipo = ud.get("tipo")
-
-    # ✅ Buscar la fila activa de cuadrilla+tipo que no tenga salida
-    row = find_active_row(ssid, cuadrilla, tipo)
-    if not ssid or not row:
-        await update.message.reply_text("❌ No hay registro activo. Usa /ingreso para iniciar.")
-        return
-        
-    ud["row"] = row
-
-
-    # 1) Descargar a memoria
-    photo = update.message.photo[-1]
-    buff = io.BytesIO()
-    try:
-        tg_file = await context.bot.get_file(photo.file_id)
-        for attempt in range(3):
-            try:
-                await tg_file.download_to_memory(out=buff)
-                break
-            except Exception as e:
-                if attempt == 2:
-                    raise
-                await asyncio.sleep(2 * (attempt + 1))
-        buff.seek(0)
-    except Exception as e:
-        logger.error(f"[ERROR] Descargando foto TG (salida): {e}")
-        await update.message.reply_text("⚠️ No pude leer la foto desde Telegram. Reenvíala, por favor.")
-        return
-
-    # 2) Comprimir, subir y guardar link
-    try:
-        filename = f"selfie_salida_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
-        link = comprimir_y_subir(buff, filename, ssid, row, "FOTO FIN CUADRILLA")
-    except Exception:
-        await update.message.reply_text("⚠️ No pude subir la foto de salida a Drive. Reenvíala para continuar.")
-        return
-
-    # 3) Registrar hora salida y pedir ubicación final
-    hora = datetime.now(LIMA_TZ).strftime("%H:%M")
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(
-        None,
-        update_single_cell,
-        ssid,
-        SHEET_TITLE,
-        COL["HORA SALIDA"],
-        row,
-        hora
-    )
-    ud["paso"] = "ubicacion_salida"
-    user_data[chat_id] = ud
-
-    await update.message.reply_text(
-        f"⏱️ Hora de salida registrada: <b>{hora}</b>.\n\n"
-        "📍 Comparte tu <b>ubicación actual</b> para finalizar.",
-        parse_mode="HTML"
-    )
-
-
 # ================== ROUTER DE FOTOS ==================
 
 async def manejar_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     try:
         chat_id = update.effective_chat.id
-        paso = user_data.get(chat_id, {}).get("paso")
+        ud = user_data.setdefault(chat_id, {})
+        paso = ud.get("paso")
         
         # 🚦 Validación: solo aceptar FOTO en este paso
         if not await validar_flujo(update, chat_id):
             return
         
-        ud = user_data.setdefault(chat_id, {})
+        ssid, id_registro = ud.get("spreadsheet_id"), ud.get("id_registro")
+        if not ssid or not id_registro:
+            await update.message.reply_text("⚠️ No hay registro activo. Usa /ingreso para iniciar.")
+            return
+
+        # ✅ Buscar fila activa en Sheets
+        row = find_active_row(ssid, id_registro)
+        if not row:
+            await update.message.reply_text("⚠️ No encontré tu registro activo. Usa /ingreso para iniciar de nuevo.")
+            return
 
         # Selfie de INICIO -> capturamos y pedimos confirmación
         if paso == "esperando_selfie_inicio":
             photo = update.message.photo[-1]
             ud["pending_selfie_inicio_file_id"] = photo.file_id
+            ud["row"] = row  # ✅ Guardamos la fila real
             ud["paso"] = "confirmar_selfie_inicio"
             ud["botones_activos"] = ["confirmar_selfie_inicio", "repetir_selfie_inicio"]
 
@@ -1211,6 +1192,7 @@ async def manejar_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if paso == "esperando_selfie_salida":
             photo = update.message.photo[-1]
             ud["pending_selfie_salida_file_id"] = photo.file_id
+            ud["row"] = row  # ✅ Guardamos la fila real
             ud["paso"] = "confirmar_selfie_salida"
             ud["botones_activos"] = ["confirmar_selfie_salida", "repetir_selfie_salida"]
 
@@ -1272,13 +1254,19 @@ async def handle_confirmar_selfie_inicio(update: Update, context: ContextTypes.D
             return
 
         if query.data == "confirmar_selfie_inicio":
-            ssid, row = ud.get("spreadsheet_id"), ud.get("row")
+            ssid, id_registro = ud.get("spreadsheet_id"), ud.get("id_registro")
             fid = ud.get("pending_selfie_inicio_file_id")
-            if not (ssid and row and fid):
+            if not (ssid and id_registro and fid):
                 ud.pop("botones_activos", None)
                 await query.edit_message_text("❌ Falta foto de inicio de actividades.")
                 return
-    
+
+            # ✅ Buscar la fila por ID_REGISTRO
+            row = find_active_row(ssid, id_registro)
+            if not row:
+                await query.edit_message_text("⚠️ No encontré tu registro activo.")
+                return
+
             tg_file = await context.bot.get_file(fid)
             buff = io.BytesIO()
             await tg_file.download_to_memory(out=buff)
@@ -1286,6 +1274,7 @@ async def handle_confirmar_selfie_inicio(update: Update, context: ContextTypes.D
 
             filename = f"selfie_inicio_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
             loop = asyncio.get_running_loop()
+
             link = await loop.run_in_executor(
                 None,
                 lambda: comprimir_y_subir(buff, filename, ssid, row, "FOTO INICIO CUADRILLA")
@@ -1298,9 +1287,8 @@ async def handle_confirmar_selfie_inicio(update: Update, context: ContextTypes.D
 
             # Pedir ubicación en tiempo real
             ud["paso"] = "esperando_live_inicio"
-            ud.pop("botones_activos", None)  # limpiar
-            del ud["pending_selfie_inicio_file_id"]
-        
+            ud.pop("botones_activos", None)  # limpiar botones activos
+
             # 🧹 Limpiar memoria y medir
             if "pending_selfie_inicio_file_id" in ud:
                 del ud["pending_selfie_inicio_file_id"]
@@ -1318,6 +1306,7 @@ async def handle_confirmar_selfie_inicio(update: Update, context: ContextTypes.D
         await query.edit_message_text("⚠️ No pude registra tu foto.\n Reintenta enviando tu foto nuevamente.")
         
 
+
 async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query or not es_chat_privado(update):
@@ -1325,6 +1314,11 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
 
     chat_id = query.message.chat.id
     ud = user_data.setdefault(chat_id, {})
+
+    # ⚡ Solo aceptar botones activos
+    if query.data not in ud.get("botones_activos", []):
+        await query.answer("⚠️ Este botón ya no es válido.")
+        return
 
     try:
         await query.answer("Procesando foto de salida... ⏳")
@@ -1344,13 +1338,20 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
 
     # --- Caso: confirmar selfie ---
     if query.data == "confirmar_selfie_salida":
-        ssid, row = ud.get("spreadsheet_id"), ud.get("row")
+        ssid, id_registro = ud.get("spreadsheet_id"), ud.get("id_registro")
         fid = ud.get("pending_selfie_salida_file_id")
-        if not (ssid and row and fid):
+        if not (ssid and id_registro and fid):
             await query.edit_message_text("❌ Falta tu foto de salida 👀")
             return
 
         try:
+
+            # ✅ Buscar la fila real por ID_REGISTRO
+
+            row = find_active_row(ssid, id_registro)
+            if not row:
+                await query.edit_message_text("⚠️ No encontré tu registro activo.")
+                return
 
             # Descargar de Telegram
             tg_file = await context.bot.get_file(fid)
@@ -1358,8 +1359,10 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
             await tg_file.download_to_memory(out=buff)
             buff.seek(0)
 
-            filename = f"selfie_salida_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
-            # Procesar (comprimir + subir a Drive) en un executor
+            filename = f"selfie_salida_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{id_registro}.jpg"
+            
+
+            # ✅ Subir con row correcto Procesar (comprimir + subir a Drive) en un executor
             loop = asyncio.get_running_loop()
             link = await loop.run_in_executor(
                 None,
@@ -1368,16 +1371,19 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
 
             # Registrar hora de salida
             hora = datetime.now(LIMA_TZ).strftime("%H:%M")
+            row = find_active_row(ssid, ud["id_registro"])
             update_single_cell(ssid, SHEET_TITLE, COL["HORA SALIDA"], row, hora)
             ud["hora_salida"] = hora
 
             # Avanzar paso
             ud["paso"] = "esperando_live_salida"
+            ud.pop("botones_activos", None)  # limpiar botones activos
 
 
             # 🧹 Limpiar memoria y medir
             if "pending_selfie_salida_file_id" in ud:
                 del ud["pending_selfie_salida_file_id"]
+            
             gc.collect()
             log_memoria("Después de confirmar selfie SALIDA")
 
@@ -1402,10 +1408,7 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
 #==================LOG RAM===========
 
 def log_memoria(contexto=""):
-    proceso = psutil.Process(os.getpid())
-    memoria_mb = proceso.memory_info().rss / 1024 / 1024  # en MB
-    logger.info(f"[MEMORIA] {contexto} -> {memoria_mb:.2f} MB")
-
+    logger.info(f"[MEMORIA] {contexto}")
 
 # ================== CALLBACKS / AYUDA (placeholder) ==================
 async def manejar_repeticiones(update: Update, context: ContextTypes.DEFAULT_TYPE):
