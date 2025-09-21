@@ -1,6 +1,7 @@
-python-telegram-bot==20.3
-google-api-python-client==2.129.0
-google-auth==2.34.0
-google-auth-oauthlib==1.2.1
-pytz==2023.3
-Pillow==10.2.0
+python-telegram-bot==20.7
+apscheduler==3.10.4
+pillow==10.3.0
+google-api-python-client==2.133.0
+google-auth==2.29.0
+google-auth-httplib2==0.2.0
+google-auth-oauthlib==1.2.0
