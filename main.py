@@ -1388,8 +1388,10 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
                 parse_mode="HTML"
             )
 
-    if chat_id not in USUARIOS_TEST:
-        marcar_registro_completo(chat_id)
+            # 🚦 Aquí va la marca de finalización (solo si no es usuario de prueba)
+
+            if chat_id not in USUARIOS_TEST:
+                marcar_registro_completo(chat_id)
 
         except Exception as e:
             logger.error(f"[ERROR] confirm_selfie_salida upload: {e}")
