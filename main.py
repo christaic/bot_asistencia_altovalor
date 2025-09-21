@@ -720,7 +720,7 @@ async def ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ud = user_data.get(chat_id, {})
 
         # 🚦 Validar horario laboral
-    if not dentro_horario_laboral():
+    if chat_id not in USUARIOS_TEST and not dentro_horario_laboral():
         await update.message.reply_text(
             "⚠️ Solo puedes registrar tu asistencia entre las <b>07:00 AM y 11:30 PM</b>.",
             parse_mode="HTML"
@@ -830,6 +830,10 @@ async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_
                 ud["spreadsheet_id"] = ssid
                 ud["row"] = row
                 logger.info(f"[OK] Fila base creada: row={row}, cuadrilla='{ud['cuadrilla']}'")
+                logger.info(
+                    f"[EVIDENCIA] USER_ID={chat_id} | ID_REGISTRO={ud.get('id_registro')} "
+                    f"| Paso=Nombre Cuadrilla | Cuadrilla='{ud.get('cuadrilla')}' | Row={row}"
+                )
 
             # 3) Avanza a tipo de cuadrilla
             ud["paso"] = "tipo"
@@ -941,6 +945,11 @@ async def handle_confirmar_tipo(update: Update, context: ContextTypes.DEFAULT_TY
         # Escribe en Sheet y avanza a pedir selfie de inicio
         
         update_single_cell(ssid, SHEET_TITLE, COL["TIPO DE CUADRILLA"], row, tipo)
+        logger.info(
+            f"[EVIDENCIA] USER_ID={chat_id} | ID_REGISTRO={ud.get('id_registro')} "
+            f"| Paso=Tipo Cuadrilla | Tipo='{tipo}' | Row={row}"
+        )
+
         ud["tipo"] = tipo
         ud["paso"] = "esperando_selfie_inicio"
 
@@ -1064,6 +1073,11 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if ud.get("paso") == "esperando_live_inicio":
         update_single_cell(ssid, SHEET_TITLE, COL["LATITUD"], row, f"{lat:.6f}")
         update_single_cell(ssid, SHEET_TITLE, COL["LONGITUD"], row, f"{lon:.6f}")
+        logger.info(
+            f"[EVIDENCIA] USER_ID={chat_id} | ID_REGISTRO={ud.get('id_registro')} "
+            f"| Paso=Ubicación INICIO | Lat={lat:.6f}, Lon={lon:.6f} | Row={row}"
+        )
+        
         ud["paso"] = "en_jornada"   # jornada abierta hasta /salida
         user_data[chat_id] = ud
 
@@ -1077,6 +1091,12 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if ud.get("paso") == "esperando_live_salida":
         update_single_cell(ssid, SHEET_TITLE, COL["LATITUD SALIDA"], row, f"{lat:.6f}")
         update_single_cell(ssid, SHEET_TITLE, COL["LONGITUD SALIDA"], row, f"{lon:.6f}")
+
+        logger.info(
+            f"[EVIDENCIA] USER_ID={chat_id} | ID_REGISTRO={ud.get('id_registro')} "
+            f"| Paso=Ubicación SALIDA | Lat={lat:.6f}, Lon={lon:.6f} | Row={row}"
+        )
+
         ud["paso"] = "finalizado"
         user_data[chat_id] = ud
 
@@ -1107,6 +1127,14 @@ async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
         return
+
+    # 🚦 Validar horario laboral (excepto usuarios de prueba)
+    if chat_id not in USUARIOS_TEST and not dentro_horario_laboral():
+        await update.message.reply_text(
+            "⚠️ Solo puedes registrar tu <b>asistencia</b> entre las <b>07:00 AM y 11:30 PM</b>.",
+            parse_mode="HTML"
+        )
+        return 
 
     # 🚦 Validar pasos obligatorios antes de permitir salida
     if not ud.get("cuadrilla"):
@@ -1285,6 +1313,11 @@ async def handle_confirmar_selfie_inicio(update: Update, context: ContextTypes.D
             update_single_cell(ssid, SHEET_TITLE, COL["HORA INGRESO"], row, hora)
             ud["hora_ingreso"] = hora
 
+            logger.info(
+                f"[EVIDENCIA] USER_ID={chat_id} | ID_REGISTRO={ud.get('id_registro')} "
+                f"| Paso=Selfie INICIO | Hora={hora} | Row={row} | file_id={fid}"
+            )
+
             # Pedir ubicación en tiempo real
             ud["paso"] = "esperando_live_inicio"
             ud.pop("botones_activos", None)  # limpiar botones activos
@@ -1374,6 +1407,11 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
             row = find_active_row(ssid, ud["id_registro"])
             update_single_cell(ssid, SHEET_TITLE, COL["HORA SALIDA"], row, hora)
             ud["hora_salida"] = hora
+
+            logger.info(
+                f"[EVIDENCIA] USER_ID={chat_id} | ID_REGISTRO={ud.get('id_registro')} "
+                f"| Paso=Selfie SALIDA | Hora={hora} | Row={row} | file_id={fid}"
+            )
 
             # Avanzar paso
             ud["paso"] = "esperando_live_salida"
