@@ -536,8 +536,8 @@ def mostrar_botonera(paso: str):
     
     if paso == "confirmar_tipo":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("🟠 DISPONIBILIDAD", callback_data="tipo_disp")],
-            [InlineKeyboardButton("⚪ REGULAR", callback_data="tipo_reg")]
+            [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_tipo")],
+            [InlineKeyboardButton("🔄 Corregir", callback_data="corregir_tipo")]
         ])
     
     if paso == "confirmar_selfie_inicio":
@@ -907,11 +907,19 @@ async def handle_tipo_cuadrilla(update: Update, context: ContextTypes.DEFAULT_TY
     ud["botones_activos"] = ["confirmar_tipo", "corregir_tipo"]
 
     kb = mostrar_botonera("confirmar_tipo")
-    await query.edit_message_text(
-        f"Seleccionaste: <b>{seleccion}</b>.\n\n¿Es correcto?",
-        parse_mode="HTML",
-        reply_markup=kb
-    )
+
+    # 🚦 Evitamos error de "Message is not modified"
+    try:
+        await query.edit_message_text(
+            f"Seleccionaste: <b>{seleccion}</b>.\n\n¿Es correcto?",
+            parse_mode="HTML",
+            reply_markup=kb
+        )
+    except Exception as e:
+        if "Message is not modified" in str(e):
+            logger.warning(f"[handle_tipo_cuadrilla] Botón repetido ignorado (chat_id={chat_id})")
+        else:
+            raise
 
 # ====================== CORREGIR TIPO O CONFIRMAR ===========
 
@@ -938,7 +946,18 @@ async def handle_confirmar_tipo(update: Update, context: ContextTypes.DEFAULT_TY
             [InlineKeyboardButton("🟠 DISPONIBILIDAD", callback_data="tipo_disp")],
             [InlineKeyboardButton("⚪ REGULAR", callback_data="tipo_reg")],
         ])
-        await query.edit_message_text("Selecciona el *tipo de cuadrilla*:", parse_mode="Markdown", reply_markup=k)
+        
+        try:
+            await query.edit_message_text(
+                "Selecciona el <b>tipo de cuadrilla</b>:",
+                parse_mode="HTML",
+                reply_markup=k
+            )
+        except Exception as e:
+            if "Message is not modified" in str(e):
+                logger.warning(f"[handle_confirmar_tipo] Botón repetido ignorado (chat_id={chat_id})")
+            else:
+                raise
         return
 
     if data == "confirmar_tipo":
