@@ -323,6 +323,9 @@ PASOS = {
     "confirmar_nombre": {
         "mensaje": "👉 Confirma o corrige el nombre de tu cuadrilla usando los botones."
     },
+    "tipo": {
+        "mensaje": "📌 Selecciona el <b>tipo de cuadrilla</b> usando los botones. 👇"
+    },
     "esperando_selfie_inicio": {
         "mensaje": "📸 Aquí solo debes enviar tu foto de inicio con tus EPPs completos. 👷‍♂️👷‍♀️"
     },
@@ -539,6 +542,12 @@ def mostrar_botonera(paso: str):
             [InlineKeyboardButton("✏️ Corregir", callback_data="corregir_nombre")]
         ])
     
+    if paso == "tipo":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🟠 DISPONIBILIDAD", callback_data="tipo_disp")],
+            [InlineKeyboardButton("⚪ REGULAR", callback_data="tipo_reg")]
+        ])    
+    
     if paso == "confirmar_tipo":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_tipo")],
@@ -573,13 +582,13 @@ async def estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    msg = PASOS.get(paso, {}).get("mensaje", "Aquí debes escribir el nombre de tu cuadrilla.👷‍♂️👷‍♀️\n\n""✏️ Recuerda ingresarlo como aparece en PHOENIX.\n\n"
-        "Ejemplo:\n\n D 1 WIN SGA CHRISTOPHER INGA CONTRERAS\nD 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA")
+    msg = PASOS.get(paso, {}).get("mensaje",  "🧐🧐 Tienes un registro activo pendiente.\nUsa /estado para ver en que paso te encuentras. 💪💪")
+    
     kb = mostrar_botonera(paso)
 
-    if kb:
+    if kb:  # Si hay botonera, la mostramos
         await update.message.reply_text(msg, parse_mode="HTML", reply_markup=kb)
-    else:
+    else:   # Si no, solo mensaje
         await update.message.reply_text(msg, parse_mode="HTML")
 
 
