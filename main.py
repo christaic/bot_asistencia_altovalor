@@ -21,7 +21,18 @@ from telegram.ext import (
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from pytz import timezone
+
+
+#== RESET REGISTRO 00:00==
+
+async def resetear_registros():
+    """Limpia user_data y registro_diario cada día a las 00:00"""
+    global user_data, registro_diario
+    user_data.clear()
+    registro_diario.clear()
+    logger.info("🧹 Limpieza diaria ejecutada: user_data y registro_diario reiniciados.")
 
 #== COMPRIMIR IMAGEN VARIABLE==
 
@@ -550,7 +561,7 @@ async def estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ud = user_data.get(chat_id, {})
     paso = ud.get("paso")
 
-    if not paso or paso == "finalizado":
+    if paso is None or paso == "finalizado":
         await update.message.reply_text(
             "⚠️ No tienes un registro activo.\nUsa /ingreso para iniciar tu jornada.",
             parse_mode="HTML"
@@ -826,7 +837,7 @@ async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_
             # 2) Fila base (solo una vez)
             if not ud.get("spreadsheet_id") or not ud.get("row"):
                 base = {"CUADRILLA": ud["cuadrilla"], "TIPO DE CUADRILLA": ""}
-                row = append_base_row(ssid, base)
+                row = append_base_row(ssid, base, chat_id)
                 ud["spreadsheet_id"] = ssid
                 ud["row"] = row
                 logger.info(f"[OK] Fila base creada: row={row}, cuadrilla='{ud['cuadrilla']}'")
@@ -1516,6 +1527,12 @@ def main():
     # --- ERRORES ---
     app.add_error_handler(log_error)
 
+    # --- JOB DIARIO: reset a medianoche ---
+    scheduler = AsyncIOScheduler(timezone=str(LIMA_TZ))
+    scheduler.add_job(resetear_registros, "cron", hour=0, minute=0)
+    scheduler.start()
+    logger.info("⏰ Job diario programado para resetear registros a las 00:00.")
+    
     # --- ARRANQUE EN POLLING ---
     logger.info("🚀 Bot de Asistencia (privado) en ejecución...")
     app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
