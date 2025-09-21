@@ -1,14 +1,6 @@
-# Telegram bot
-python-telegram-bot==20.6
-
-# Google APIs
-google-api-python-client==2.137.0
-google-auth==2.35.0
-google-auth-httplib2==0.2.0
+python-telegram-bot==20.3
+google-api-python-client==2.129.0
+google-auth==2.34.0
 google-auth-oauthlib==1.2.1
-
-# Utilidades
-pytz==2024.2
-
-Pillow
-psutil
+pytz==2023.3
+Pillow==10.2.0
