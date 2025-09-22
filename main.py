@@ -582,13 +582,16 @@ async def estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    msg = PASOS.get(paso, {}).get("mensaje",  "🧐🧐 Tienes un registro activo pendiente.\nUsa /estado para ver en que paso te encuentras. 💪💪")
-    
-    kb = mostrar_botonera(paso)
+     # ✅ Recuperar mensaje del paso actual
+    msg = PASOS.get(paso, {}).get("mensaje")
+    if not msg:
+        msg = "🧐🧐 Tienes un registro activo pendiente.\nUsa /estado para ver en qué paso te encuentras. 💪💪"
 
-    if kb:  # Si hay botonera, la mostramos
+    # ✅ Mostrar botonera si corresponde
+    kb = mostrar_botonera(paso)
+    if kb:
         await update.message.reply_text(msg, parse_mode="HTML", reply_markup=kb)
-    else:   # Si no, solo mensaje
+    else:
         await update.message.reply_text(msg, parse_mode="HTML")
 
 
