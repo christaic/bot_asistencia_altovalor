@@ -811,6 +811,8 @@ async def nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=mostrar_botonera("confirmar_nombre")
     )
 
+
+# ===================== BOTONES CONFIRMAR/CORREGIR CUADRILLA =====================
 async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query or not es_chat_privado(update):
@@ -820,7 +822,6 @@ async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_
     ud = user_data.setdefault(chat_id, {})
 
     # ⚡ Solo aceptar si está en los botones activos
-
     if query.data not in ud.get("botones_activos", []):
         await query.answer("⚠️ Este botón ya no es válido.")
         return
@@ -830,21 +831,24 @@ async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_
         await query.answer("Procesando…")
 
         if query.data == "corregir_nombre":
-            ud["paso"] = 0
-            ud["cuadrilla"] = ""
-            ud.pop("botones_activos", None)   # limpiar
+            ud["paso"] = "esperando_cuadrilla"
+            ud.pop("cuadrilla", None)           # limpiar nombre anterior
+            ud.pop("botones_activos", None)     # limpiar botones
             await query.edit_message_text(
-                "✍️ <b>Hola, escribe el nombre de tu cuadrilla 👷‍♂️ nuevamente.\n"
+                "✍️ <b>Hola, escribe el nombre de tu cuadrilla 👷‍♂️ nuevamente.</b>\n\n"
                 "✏️ Recuerda ingresarlo como aparece en <b>PHOENIX</b>.\n\n"
-                "</b>Ejemplo:\n\n <b>D 1 WIN SGA CHRISTOPHER INGA CONTRERAS</b>\n""<b>D 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA</b>",
+                "Ejemplo:\n\n"
+                "<b>D 1 WIN SGA CHRISTOPHER INGA CONTRERAS</b>\n"
+                "<b>D 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA</b>",
                 parse_mode="HTML"
             )
+            return
 
         if query.data == "confirmar_nombre":
             if not ud.get("cuadrilla"):
-                ud["paso"] = 0
-                ud.pop("botones_activos", None)   # limpiar
-                await query.edit_message_text("⚠️ No encontré el nombre. Escríbelo y confirma.")
+                ud["paso"] = "esperando_cuadrilla" 
+                ud.pop("botones_activos", None)
+                await query.edit_message_text("⚠️ No encontré el nombre. Escríbelo nuevamente por favor. ")
                 return
 
             # 1) Sheet global + headers
@@ -860,13 +864,12 @@ async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_
                 ud["row"] = row
                 logger.info(f"[OK] Fila base creada: row={row}, cuadrilla='{ud['cuadrilla']}'")
                 logger.info(
-                    f"[EVIDENCIA] USER_ID={chat_id} | ID_REGISTRO={ud.get('id_registro')} "
-                    f"| Paso=Nombre Cuadrilla | Cuadrilla='{ud.get('cuadrilla')}' | Row={row}"
+                    f"[EVIDENCIA] USER_ID={chat_id} | Paso=Nombre Cuadrilla | Cuadrilla='{ud.get('cuadrilla')}' | Row={row}"
                 )
 
             # 3) Avanza a tipo de cuadrilla
             ud["paso"] = "tipo"
-            ud.pop("botones_activos", None)   # limpiar
+            ud.pop("botones_activos", None)  # limpiar botones activos
             keyboard = [
                 [InlineKeyboardButton("🟠 DISPONIBILIDAD", callback_data="tipo_disp")],
                 [InlineKeyboardButton("⚪ REGULAR", callback_data="tipo_reg")],
@@ -882,10 +885,12 @@ async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_
         try:
             await query.message.reply_text(
                 "❌ Ocurrió un error.\n"
-                "Escribe /estado para poder indicarte en que paso te encuentras."
+                "Escribe /estado para poder indicarte en qué paso te encuentras."
             )
         except Exception:
             pass
+
+
 
 async def debug_callback_catcher(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
