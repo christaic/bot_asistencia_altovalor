@@ -794,8 +794,8 @@ async def nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await validar_flujo(update, chat_id):
         return    
         
-    ud = user_data.setdefault(chat_id, {"paso": 0})
-    if ud.get("paso") != 0:
+    ud = user_data.setdefault(chat_id, {"paso": "esperando_cuadrilla"})
+    if ud.get("paso") != "esperando_cuadrilla":
         return
 
     if not await validar_contenido(update, "texto"):
