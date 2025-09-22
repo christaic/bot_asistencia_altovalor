@@ -623,7 +623,7 @@ async def validar_flujo(update: Update, chat_id: int) -> bool:
         return False
 
     # Paso 0 → solo texto
-    if paso == 0 and not update.message.text:
+    if paso == "esperando_cuadrilla" and not update.message.text:
         await update.message.reply_text(
             PASOS["esperando_cuadrilla"]["mensaje"], parse_mode="HTML"
         )
@@ -660,7 +660,7 @@ async def validar_flujo(update: Update, chat_id: int) -> bool:
             return False
 
      # 🔒 Si el paso requiere botones → bloquear texto/fotos/ubicación hasta que responda
-    if paso in ("confirmar_nombre", "confirmar_tipo", "confirmar_selfie_inicio", "confirmar_selfie_salida"):
+    if paso in ("confirmar_nombre","tipo", "confirmar_tipo", "confirmar_selfie_inicio", "confirmar_selfie_salida"):
         kb = mostrar_botonera(paso)
         if kb:
             await update.message.reply_text(
@@ -671,7 +671,7 @@ async def validar_flujo(update: Update, chat_id: int) -> bool:
         return False  
 
     # Cualquier otro contenido fuera de lugar
-    if paso not in (0, "esperando_selfie_inicio", "esperando_live_inicio",
+    if paso not in ("esperando_cuadrilla", "esperando_selfie_inicio", "esperando_live_inicio",
                     "esperando_selfie_salida", "esperando_live_salida",
                     "confirmar_nombre", "confirmar_tipo",
                     "confirmar_selfie_inicio", "confirmar_selfie_salida"):
@@ -761,7 +761,7 @@ async def ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if ud.get("paso") not in (None, "finalizado"):
         paso = ud.get("paso")
         msg = PASOS.get(paso, {}).get(
-            "mensaje", "⚠️ Ya tienes un registro en curso.\nPara ver el estado de tu registro presiona:\n🆘 /estado para ayudarte en que paso te encuentras o\n 🛫 /salida para finalizar jornada."
+            "mensaje", "⚠️ Ya tienes un registro en curso.\n\nPara ver el estado de tu registro presiona:\n\n🆘 /estado para ayudarte en que paso te encuentras o\n 🛫 /salida para finalizar jornada."
         )
         await update.message.reply_text(msg, parse_mode="HTML")
         return
@@ -775,7 +775,7 @@ async def ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ✅ 3. Caso válido: iniciar nuevo flujo
-    user_data[chat_id] = {"paso": 0}
+    user_data[chat_id] = {"paso": "esperando_cuadrilla"}
     await update.message.reply_text(
         "✍️ Hola, escribe el <b>nombre de tu cuadrilla</b>.👷‍♂️👷‍♀️\n\n"
         "✏️ Recuerda ingresarlo como aparece en <b>PHOENIX</b>.\n\n"
