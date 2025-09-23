@@ -321,7 +321,10 @@ PASOS = {
         "Ejemplo:\n\n D 1 WIN SGA CHRISTOPHER INGA CONTRERAS\nD 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA"
     },
     "confirmar_nombre": {
-        "mensaje": "👉 Confirma o corrige el nombre de tu cuadrilla usando los botones."
+        "mensaje": "👉 Confirma o corrige el nombre de tu cuadrilla usando los botones. 👇"
+    },
+    "confirmar_tipo": {
+        "mensaje": "👉 Confirma o corrige el <b>tipo de cuadrilla</b> usando los botones. 👇 "
     },
     "tipo": {
         "mensaje": "📌 Selecciona el <b>tipo de cuadrilla</b> usando los botones. 👇"
@@ -330,19 +333,19 @@ PASOS = {
         "mensaje": "📸 Aquí solo debes enviar tu foto de inicio con tus EPPs completos. 👷‍♂️👷‍♀️"
     },
     "confirmar_selfie_inicio": {
-        "mensaje": "👉 Confirma o corrige la foto de inicio usando los botones."
+        "mensaje": "👉 Confirma o corrige la foto de inicio usando los botones. 👇"
     },
     "esperando_live_inicio": {
         "mensaje": "📍 Comparte tu ubicación en tiempo real para continuar. 💪"
     },
     "en_jornada": {
-        "mensaje": "🚀 Estás en jornada. Usa /salida para registrar tu fin de labores."
+        "mensaje": "🚀 Estás en jornada. Usa /salida para registrar tu fin de labores. 🔥"
     },
     "esperando_selfie_salida": {
         "mensaje": "📸 Aquí solo debes enviar tu foto de salida con tus EPPs completos. 👷‍♂️👷‍♀️"
     },
     "confirmar_selfie_salida": {
-        "mensaje": "👉 Confirma o corrige la foto de salida usando los botones."
+        "mensaje": "👉 Confirma o corrige la foto de salida usando los botones. 👇"
     },
     "esperando_live_salida": {
         "mensaje": "📍 Comparte tu ubicación en tiempo real para finalizar tu jornada. 💪"
