@@ -735,6 +735,27 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(comandos, parse_mode="HTML")
 
 
+async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not es_chat_privado(update):
+        return
+
+    texto = (
+        "👋 ¡Hola! Soy tu bot de asistencia WIN 👷‍♂️👷‍♀️\n\n"
+        "ℹ️ Instrucciones para uso del bot:\n\n"
+        "1️⃣ Usa /ingreso para registrar tu Inicio de jornada laboral 👷‍♂️\n"
+        "   - Envia el nombre de tu cuadrilla ✍️\n"
+        "   - Luego la foto de inicio de actividades 📸\n"
+        "   - Ubicación en tiempo real 📍\n\n"
+        "2️⃣ Usa /salida para registrar tu Fin de jornada laboral 👷‍♂️:\n"
+        "   - Envía la foto de fin de actividades 📸\n"
+        "   - Ubicación en tiempo real 📍\n\n"
+        "📌 Usa /estado para ver en qué paso del flujo te encuentras 💪\n\n"
+        "‼️ El flujo es estricto, no puedes saltarte pasos 😅"
+    )
+
+    await update.message.reply_text(texto, parse_mode="HTML")
+
+
 # ================== INGRESO ==================
 async def ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not es_chat_privado(update):
