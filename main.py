@@ -695,56 +695,45 @@ async def validar_flujo(update: Update, chat_id: int) -> bool:
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not es_chat_privado(update):
         return
+
     chat_id = update.effective_chat.id
     ud = user_data.get(chat_id, {})
+    paso = ud.get("paso")
 
-    if ud.get("paso") and ud.get("paso") not in (None, "finalizado"):
-        paso = ud.get("paso")
+    # 🚦 Caso: ya está en un flujo activo
+    if paso and paso not in (None, "finalizado"):
         msg = PASOS.get(paso, {}).get(
-            "mensaje", "⚠️ Ya tienes un registro en curso.\nPara ver el estado de tu registro presiona:\n🆘 /estado para ayudarte en que paso te encuentras o\n 🛫 /salida para finalizar jornada."
+            "mensaje",
+            "⚠️ Ya tienes un registro en curso.\n\n"
+            "Para ver el estado de tu registro presiona:\n"
+            "🆘 /estado para ayudarte en qué paso te encuentras. \n"
+            "🛫 /salida para finalizar jornada."
         )
-        await update.message.reply_text(msg, parse_mode="HTML")
+
+        kb = mostrar_botonera(paso)
+        if kb:
+            await update.message.reply_text(msg, parse_mode="HTML", reply_markup=kb)
+        else:
+            await update.message.reply_text(msg, parse_mode="HTML")
         return
 
-    comandos = """
-📌 Funciones disponibles:
-
-/ingreso – Iniciar registro de asistencia 📝
-/salida – Registrar salida final 📸
-/ayuda – Mostrar instrucciones ℹ️
-"""
-
-    keyboard = []
-
-    await update.message.reply_text(
-        "👋👋 ¡Hola! Bienvenido al bot de asistencia SGA - WIN 👷‍♂️👷‍♂️.\n\n" + comandos,
-        parse_mode="HTML",
+    # 🚦 Caso: no hay registro activo → bienvenida con comandos
+    comandos = (
+        "👋 ¡Hola! Bienvenido al bot de asistencia SGA - WIN 👷‍♂️👷‍♀️\n\n"
+        "ℹ️ Instrucciones para uso del bot:\n\n"
+        "1️⃣ Usa /ingreso para registrar tu Inicio de jornada laboral 👷‍♂️:\n"
+        "   - Envía el nombre de tu cuadrilla ✍️\n"
+        "   - Luego la foto de inicio de actividades 📸\n"
+        "   - Ubicación en tiempo real 📍\n\n"
+        "2️⃣ Usa /salida para tu Fin de jornada laboral 👷‍♂️:\n"
+        "   - Envía la foto de fin de actividades 📸\n"
+        "   - Ubicación en tiempo real 📍\n\n"
+        "ℹ️ Usa /estado para ver el paso en el que te encuentras 💪\n\n"
+        "❗ El flujo es estricto, no puedes saltarte pasos. 😉"
     )
 
-async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not es_chat_privado(update):
-        return
+    await update.message.reply_text(comandos, parse_mode="HTML")
 
-    texto = """
-👋 👋 ¡Hola! Bienvenido al bot de asistencia SGA - WIN 👷‍♂️👷‍♂️\n\n
-ℹ️ Instrucciones para uso del bot:
-
-1️⃣ Usa /ingreso para registrar tu Inicio de jornada laboral 👷‍♂️ .  
-   - Envía el nombre de tu cuadrilla  
-   - Luego la foto de inicio de actividades 📸
-   - Ubicación en tiempo real 📍  
-
-2️⃣ Usa /salida para tu Fin de jornada laboral 👷‍♂️:  
-   - Envia la foto de fin de actividades 📸  
-   - Ubicación en tiempo real 📍  
-
-ℹ️ Usa /estado para ver el paso en el que te encuentras 💪
-
-‼️ El flujo es estricto, no puedes saltarte pasos. 🧐\n
-
-"""
-
-    await update.message.reply_text(texto, parse_mode="HTML")
 
 # ================== INGRESO ==================
 async def ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
