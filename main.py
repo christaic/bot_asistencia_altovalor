@@ -828,13 +828,15 @@ async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_
 
     try:
         # feedback para confirmar que el callback llegó
-        await query.answer("Procesando…")
+        await query.answer("Procesando… ⏳")
 
         if query.data == "corregir_nombre":
             ud["paso"] = "esperando_cuadrilla"
             ud.pop("cuadrilla", None)           # limpiar nombre anterior
             ud.pop("botones_activos", None)     # limpiar botones
-            await query.edit_message_text(
+
+            try:
+                await query.edit_message_text(
                 "✍️ <b>Hola, escribe el nombre de tu cuadrilla 👷‍♂️ nuevamente.</b>\n\n"
                 "✏️ Recuerda ingresarlo como aparece en <b>PHOENIX</b>.\n\n"
                 "Ejemplo:\n\n"
@@ -842,6 +844,11 @@ async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_
                 "<b>D 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA</b>",
                 parse_mode="HTML"
             )
+            except Exception as e:
+                if "Message is not modified" in str(e):
+                    logger.warning(f"[handle_nombre_cuadrilla] Mensaje repetido ignorado (chat_id={chat_id})")
+                else:
+                    raise 
             return
 
         if query.data == "confirmar_nombre":
@@ -874,23 +881,28 @@ async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_
                 [InlineKeyboardButton("🟠 DISPONIBILIDAD", callback_data="tipo_disp")],
                 [InlineKeyboardButton("⚪ REGULAR", callback_data="tipo_reg")],
             ]
-            await query.edit_message_text(
-                "Selecciona el <b>tipo de cuadrilla</b>:",
-                parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
+
+            try:
+                await query.edit_message_text(
+                    "Selecciona el <b>tipo de cuadrilla</b>:",
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+            except Exception as e:
+                if "Message is not modified" in str(e):
+                    logger.warning(f"[handle_nombre_cuadrilla] Mensaje repetido ignorado (chat_id={chat_id})")
+                else:
+                    raise
 
     except Exception:
         logger.exception("[handle_nombre_cuadrilla] Error")
         try:
             await query.message.reply_text(
                 "❌ Ocurrió un error.\n"
-                "Escribe /estado para poder indicarte en qué paso te encuentras."
+                "Escribe /estado para poder indicarte en qué paso te encuentras. 😊"
             )
         except Exception:
             pass
-
-
 
 async def debug_callback_catcher(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -911,38 +923,51 @@ async def handle_tipo_cuadrilla(update: Update, context: ContextTypes.DEFAULT_TY
 
     chat_id = query.message.chat.id
     ud = user_data.setdefault(chat_id, {})
-    data = query.data
+
+    # ⚡ Solo aceptar botones válidos
+    if query.data not in ("tipo_disp", "tipo_reg"):
+        await query.answer("⚠️ Opción no válida.")
+        return
+    
 
     try:
-        await query.answer()
+        await query.answer("Procesando tipo de cuadrila.. ⏳")
     except Exception:
         pass
 
-    if data not in ("tipo_disp", "tipo_reg"):
-        return
 
-    # Guarda selección provisional (sin escribir aún en el Sheet)
-    seleccion = "DISPONIBILIDAD" if data == "tipo_disp" else "REGULAR"
-    ud["tipo_seleccionado"] = seleccion
-    ud["paso"] = "confirmar_tipo"
-
-    # Guardamos los botones activos válidos en este estado
-    ud["botones_activos"] = ["confirmar_tipo", "corregir_tipo"]
-
-    kb = mostrar_botonera("confirmar_tipo")
-
-    # 🚦 Evitamos error de "Message is not modified"
     try:
-        await query.edit_message_text(
-            f"Seleccionaste: <b>{seleccion}</b>.\n\n¿Es correcto?",
-            parse_mode="HTML",
-            reply_markup=kb
-        )
-    except Exception as e:
-        if "Message is not modified" in str(e):
-            logger.warning(f"[handle_tipo_cuadrilla] Botón repetido ignorado (chat_id={chat_id})")
-        else:
-            raise
+    # Guarda selección provisional (sin escribir aún en el Sheet)
+        seleccion = "DISPONIBILIDAD" if query.data == "tipo_disp" else "REGULAR"
+        ud["tipo_seleccionado"] = seleccion
+        ud["paso"] = "confirmar_tipo"
+        # Guardamos los botones activos válidos en este estado
+        ud["botones_activos"] = ["confirmar_tipo", "corregir_tipo"]
+
+        kb = mostrar_botonera("confirmar_tipo")
+        logger.info(f"[FLOW] Usuario {chat_id} seleccionó tipo de cuadrilla: {seleccion}")
+
+        # 🚦 Evitamos error de "Message is not modified"
+        try:
+            await query.edit_message_text(
+                f"Seleccionaste: <b>{seleccion}</b>.\n\n¿Es correcto?",
+                parse_mode="HTML",
+                reply_markup=kb
+            )
+        except Exception as e:
+            if "Message is not modified" in str(e):
+                logger.warning(f"[handle_tipo_cuadrilla] Botón repetido ignorado (chat_id={chat_id})")
+            else:
+                raise
+
+    except Exception:
+        logger.exception("[handle_tipo_cuadrilla] Error")
+        try:
+            await query.message.reply_text(
+                "❌ Ocurrió un error.\nEscribe /estado para poder indicarte en qué paso estás. 😊"
+            )
+        except Exception:
+            pass  
 
 # ====================== CORREGIR TIPO O CONFIRMAR ===========
 
@@ -953,63 +978,97 @@ async def handle_confirmar_tipo(update: Update, context: ContextTypes.DEFAULT_TY
 
     chat_id = query.message.chat.id
     ud = user_data.setdefault(chat_id, {})
-    data = query.data
+
+    # ⚡ Solo aceptar si está en los botones activos
+    if query.data not in ud.get("botones_activos", []):
+        try:
+            await query.answer("⚠️ Este botón ya no es válido.")
+        except Exception:
+            pass
+        return
 
     try:
-        await query.answer()
-    except Exception:
-        pass
-
-    if ud.get("paso") != "confirmar_tipo":
-        return
-
-    if data == "corregir_tipo":
-        # Volver a elegir
-        k = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🟠 DISPONIBILIDAD", callback_data="tipo_disp")],
-            [InlineKeyboardButton("⚪ REGULAR", callback_data="tipo_reg")],
-        ])
-        
         try:
-            await query.edit_message_text(
-                "Selecciona el <b>tipo de cuadrilla</b>:",
-                parse_mode="HTML",
-                reply_markup=k
-            )
-        except Exception as e:
-            if "Message is not modified" in str(e):
-                logger.warning(f"[handle_confirmar_tipo] Botón repetido ignorado (chat_id={chat_id})")
-            else:
-                raise
-        return
+            await query.answer("Procesando… ⏳")
+        except Exception:
+            pass
 
-    if data == "confirmar_tipo":
-        ssid = ud.get("spreadsheet_id")
-        row  = ud.get("row")
-        if not ssid or not row:
-            await query.edit_message_text("❌ No hay registro activo. Usa /ingreso para iniciar.")
+        if ud.get("paso") != "confirmar_tipo":
             return
 
-        tipo = ud.get("tipo_seleccionado", "")
-        if not tipo:
-            await query.edit_message_text("⚠️ No encontré la selección. Vuelve a elegir el tipo.")
+        if query.data == "corregir_tipo":
+            # Volver a elegir
+            k = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🟠 DISPONIBILIDAD", callback_data="tipo_disp")],
+                [InlineKeyboardButton("⚪ REGULAR", callback_data="tipo_reg")],
+            ])
+            ud["paso"] = "tipo"
+            ud.pop("botones_activos", None)
+
+            try:
+                await query.edit_message_text(
+                    "Selecciona el <b>tipo de cuadrilla</b>:",
+                    parse_mode="HTML",
+                    reply_markup=k
+                )
+
+            except Exception as e:
+                if "Message is not modified" in str(e):
+                    logger.warning(f"[handle_confirmar_tipo] Botón repetido ignorado (chat_id={chat_id})")
+                else:
+                    raise
             return
 
-        # Escribe en Sheet y avanza a pedir selfie de inicio
+        if query.data == "confirmar_tipo":
+            ssid = ud.get("spreadsheet_id")
+            row  = ud.get("row")
+            if not ssid or not row:
+                await query.edit_message_text("❌ No hay registro activo. Usa /ingreso para iniciar.")
+                return
+
+            tipo = ud.get("tipo_seleccionado", "")
+            if not tipo:
+                await query.edit_message_text("⚠️ No encontré la selección. Vuelve a elegir el tipo.")
+                return
+
+        # ✅ Guardamos en Sheets
         
-        update_single_cell(ssid, SHEET_TITLE, COL["TIPO DE CUADRILLA"], row, tipo)
-        logger.info(
-            f"[EVIDENCIA] USER_ID={chat_id} | ID_REGISTRO={ud.get('id_registro')} "
-            f"| Paso=Tipo Cuadrilla | Tipo='{tipo}' | Row={row}"
-        )
+            try:
+                update_single_cell(ssid, SHEET_TITLE, COL["TIPO DE CUADRILLA"], row, tipo)
+                logger.info(
+                    f"[EVIDENCIA] USER_ID={chat_id} | ID_REGISTRO={ud.get('id_registro')} "
+                    f"| Paso=Tipo Cuadrilla | Tipo='{tipo}' | Row={row}"
+                )
 
-        ud["tipo"] = tipo
-        ud["paso"] = "esperando_selfie_inicio"
+                ud["tipo"] = tipo
+                ud["paso"] = "esperando_selfie_inicio"
+                ud.pop("botones_activos", None)
 
-        await query.edit_message_text(
-            f"Tipificación de cuadrilla confirmada: <b>{tipo}</b>.\n\n📸 Envía tu foto de <b>Inicio con tus EPPs completos</b>.",
-            parse_mode="HTML"
-        )
+                try:
+                    await query.edit_message_text(
+                        f"Tipificación de cuadrilla confirmada: <b>{tipo}</b>.\n\n📸 Envía tu foto de <b>Inicio con tus EPPs completos</b>.",
+                        parse_mode="HTML"
+                    )
+                except Exception as e:
+                    if "Message is not modified" in str(e):
+                        logger.warning(f"[handle_confirmar_tipo] Mensaje repetido ignorado (chat_id={chat_id})")
+                    else:
+                        raise
+
+            except Exception as e:
+                logger.error(f"[ERROR] confirm_tipo: {e}")
+                await query.edit_message_text(
+                    "⚠️ No pude registrar tu selección.\nEscribe /estado para continuar."
+                )
+
+    except Exception:
+        logger.exception("[handle_confirmar_tipo] Error inesperado")
+        try:
+            await query.message.reply_text(
+                "❌ Ocurrió un error inesperado.\nEscribe /estado para poder indicarte en que paso estás. 😊"
+            )
+        except Exception:
+            pass      
 
 # ================== FOTO INICIO + HORA INGRESO ==================
 
@@ -1091,6 +1150,7 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Solo chat privado y mensajes con location
     if not es_chat_privado(update) or not update.message or not update.message.location:
         return
+    
     chat_id = update.effective_chat.id
 
     # 🚦 Validación: solo aceptar UBICACIÓN en este paso
@@ -1101,6 +1161,7 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ssid = ud.get("spreadsheet_id")
     id_registro = ud.get("id_registro")
     if not ssid or not id_registro:
+        await update.message.reply_text("⚠️ No encontré tu registro activo. Usa /ingreso para iniciar de nuevo.")
         return
 
     # Buscar la fila activa en Sheets (más robusto que confiar solo en RAM)
@@ -1111,57 +1172,68 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     loc = update.message.location
     lat, lon = loc.latitude, loc.longitude
-
     is_live = bool(getattr(loc, "live_period", None))
 
     # Exigir live-location (no aceptar ubicación estática)
     if not is_live:
         await update.message.reply_text(
             "⚠️ Por favor, comparte tu *ubicación en tiempo real*.\n\n"
-            "Toca el clip ➜ Ubicación ➜ *Compartir ubicación en tiempo real*."
+            "📎 Toca el clip ➜ Ubicación ➜ *Compartir ubicación en tiempo real*."
         )
         return
 
+    try:
     # Ubicación de INICIO
-    if ud.get("paso") == "esperando_live_inicio":
-        update_single_cell(ssid, SHEET_TITLE, COL["LATITUD"], row, f"{lat:.6f}")
-        update_single_cell(ssid, SHEET_TITLE, COL["LONGITUD"], row, f"{lon:.6f}")
-        logger.info(
-            f"[EVIDENCIA] USER_ID={chat_id} | ID_REGISTRO={ud.get('id_registro')} "
-            f"| Paso=Ubicación INICIO | Lat={lat:.6f}, Lon={lon:.6f} | Row={row}"
-        )
+        if ud.get("paso") == "esperando_live_inicio":
+            update_single_cell(ssid, SHEET_TITLE, COL["LATITUD"], row, f"{lat:.6f}")
+            update_single_cell(ssid, SHEET_TITLE, COL["LONGITUD"], row, f"{lon:.6f}")
+            logger.info(
+                f"[EVIDENCIA] USER_ID={chat_id} | ID_REGISTRO={ud.get('id_registro')} "
+                f"| Paso=Ubicación INICIO | Lat={lat:.6f}, Lon={lon:.6f} | Row={row}"
+            )
         
-        ud["paso"] = "en_jornada"   # jornada abierta hasta /salida
-        user_data[chat_id] = ud
+            ud["paso"] = "en_jornada"   # jornada abierta hasta /salida
+            user_data[chat_id] = ud
 
-        await update.message.reply_text(
-            "✅ Ubicación de inicio registrada.\n\n"
-            "💭 Recuerda que para concluir tu jornada debes usar /salida."
-        )
-        return
+            await update.message.reply_text(
+                "✅ Ubicación de inicio registrada.\n\n"
+                "💭 Recuerda que para concluir tu jornada debes usar /salida."
+            )
+            return
 
     # Ubicación de SALIDA
-    if ud.get("paso") == "esperando_live_salida":
-        update_single_cell(ssid, SHEET_TITLE, COL["LATITUD SALIDA"], row, f"{lat:.6f}")
-        update_single_cell(ssid, SHEET_TITLE, COL["LONGITUD SALIDA"], row, f"{lon:.6f}")
+        if ud.get("paso") == "esperando_live_salida":
+            update_single_cell(ssid, SHEET_TITLE, COL["LATITUD SALIDA"], row, f"{lat:.6f}")
+            update_single_cell(ssid, SHEET_TITLE, COL["LONGITUD SALIDA"], row, f"{lon:.6f}")
 
-        logger.info(
-            f"[EVIDENCIA] USER_ID={chat_id} | ID_REGISTRO={ud.get('id_registro')} "
-            f"| Paso=Ubicación SALIDA | Lat={lat:.6f}, Lon={lon:.6f} | Row={row}"
-        )
+            logger.info(
+                f"[EVIDENCIA] USER_ID={chat_id} | ID_REGISTRO={ud.get('id_registro')} "
+                f"| Paso=Ubicación SALIDA | Lat={lat:.6f}, Lon={lon:.6f} | Row={row}"
+            )
 
-        ud["paso"] = "finalizado"
-        user_data[chat_id] = ud
+            ud["paso"] = "finalizado"
+            user_data[chat_id] = ud
 
         # ✅ Marcar registro como completo (excepto usuarios de prueba)
-        if chat_id not in USUARIOS_TEST:
-            marcar_registro_completo(chat_id)
+            if chat_id not in USUARIOS_TEST:
+                marcar_registro_completo(chat_id)
         
-        await update.message.reply_text(
-            "✅ Ubicación de salida registrada.\n\n"
-            "<b> 👷‍♂️🦺 Salida registrada. \nQue tengas un buen regreso a casa. 🏠 </b>",
-            parse_mode="HTML"
-        )
+            await update.message.reply_text(
+                "✅ Ubicación de salida registrada.\n\n"
+                "👷‍♂️ Jornada finalizada.\n"
+                "🏠 Buen regreso a casa. Nos vemos mañana 💪",
+                parse_mode="HTML"
+            )
+
+    except Exception:
+        logger.exception("[manejar_ubicacion] Error inesperado")
+        try:
+            await update.message.reply_text(
+                "❌ Ocurrió un error registrando tu ubicación.\n"
+                "Escribe /estado para continuar correctamente."
+            )
+        except Exception:
+            pass
 
 
 
@@ -1170,6 +1242,7 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not es_chat_privado(update):
         return
+    
     chat_id = update.effective_chat.id
     ud = user_data.get(chat_id)   # 👈 usamos get, no setdefault
 
@@ -1191,35 +1264,49 @@ async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 🚦 Validar pasos obligatorios antes de permitir salida
     if not ud.get("cuadrilla"):
-        await update.message.reply_text("⚠️ No puedes registrar salida todavía. Te falta escribir el <b>nombre de tu cuadrilla ✍️</b>", parse_mode="HTML")
+        await update.message.reply_text("⚠️ No puedes registrar salida todavía.\n""Te falta escribir el <b>nombre de tu cuadrilla ✍️</b>", parse_mode="HTML")
         return 
 
     if not ud.get("hora_ingreso"):
-        await update.message.reply_text("⚠️ No puedes registrar salida todavía. Te falta tu <b>foto de inicio 📸</b>", parse_mode="HTML")
+        await update.message.reply_text("⚠️ No puedes registrar salida todavía.\n""Te falta tu <b>foto de inicio 📸</b>", parse_mode="HTML")
         return
     
-    if ud.get("paso") in ("esperando_live_inicio", 0, "confirmar_selfie_inicio"):
-        await update.message.reply_text("⚠️ No puedes registrar salida todavía. Te falta tu <b>ubicación en tiempo real 📍</b>", parse_mode="HTML")
+    if ud.get("paso") in ("esperando_live_inicio", "confirmar_selfie_inicio"):
+        await update.message.reply_text("⚠️ No puedes registrar salida todavía.\n""Te falta compartir tu <b>ubicación en tiempo real 📍</b>", parse_mode="HTML")
         return
     
     # 🚦 Si ya está finalizado, bloquear
     if ud.get("paso") == "finalizado":
-        await update.message.reply_text("✅ Ya completaste tu registro hoy. No puedes registrar otra salida.")
+        await update.message.reply_text("✅ Ya completaste tu registro hoy. No puedes registrar otra salida hasta mañana.")
         return
     
     # ✅ Si cumplió con lo mínimo → permitir selfie de salida
     ssid = ud.get("spreadsheet_id")
-    cuadrilla = ud.get("cuadrilla")
-    tipo = ud.get("tipo")
-
     row = find_active_row(ssid, ud.get("id_registro"))
     if not row:
         await update.message.reply_text("⚠️ No encontré tu registro activo. ¿Seguro que hiciste /ingreso?")
         return
 
+     # 🔐 Actualizar estado
     ud["row"] = row
     ud["paso"] = "esperando_selfie_salida"
-    await update.message.reply_text("📸 Envía tu foto de <b>fin de labores con tus EPPs completos</b>.\n Para finalizar tu jornada. 🏠", parse_mode="HTML")
+    ud["botones_activos"] = ["confirmar_selfie_salida", "repetir_selfie_salida"]
+
+    logger.info(f"[SALIDA] USER_ID={chat_id} | Row={row} | Cuadrilla={ud.get('cuadrilla')}")
+
+    try:
+        await update.message.reply_text(
+            "📸 Envía tu foto de <b>fin de labores con tus EPPs completos</b>.\n"
+            "👉 Con esta foto iniciaremos el cierre de tu jornada. 🏠",
+            parse_mode="HTML"
+        )   
+    except Exception as e:
+        logger.error(f"[ERROR] salida mensaje: {e}")
+        await update.message.reply_text(
+            "⚠️ Ocurrió un problema mostrando el mensaje de salida.\n"
+            "Usa /estado para continuar en el flujo.",
+            parse_mode="HTML"
+        )
 
 
 # ================== ROUTER DE FOTOS ==================
@@ -1311,93 +1398,108 @@ async def handle_confirmar_selfie_inicio(update: Update, context: ContextTypes.D
 
     # ⚡ Solo aceptar botones activos
     if query.data not in ud.get("botones_activos", []):
-        await query.answer("⚠️ Este botón ya no es válido.")
+        try:
+            await query.answer("⚠️ Este botón ya no es válido.")
+        except Exception:
+            pass
         return
 
     # ⚡ Contestamos de inmediato el callback
-
     try:
-        await query.answer("Procesando foto de ingreso... ⏳")
-    except Exception:
-        pass
-
-    if query.data == "repetir_selfie_inicio":
-        ud["pending_selfie_inicio_file_id"] = None
-        ud["paso"] = "esperando_selfie_inicio"
-        ud.pop("botones_activos", None)
-
+        # Confirmación inmediata de callback
         try:
-            await query.edit_message_text("🔄 Envía nuevamente tu foto de inicio de actividades.\n""📸 Recuerda que debe ser con tus <b>EPPs completos</b>.", parse_mode="HTML")
-            
-        except Exception as e:
-            if "Message is not modified" in str(e):
-                logger.warning(f"[handle_confirmar_selfie_inicio] Botón repetido ignorado (chat_id={chat_id})")
-            else:
-                raise
-        return
-                
-    if query.data == "confirmar_selfie_inicio":
-        ssid, id_registro = ud.get("spreadsheet_id"), ud.get("id_registro")
-        fid = ud.get("pending_selfie_inicio_file_id")
-        if not (ssid and id_registro and fid):
+            await query.answer("Procesando foto de ingreso... ⏳")
+        except Exception:
+            pass
+
+        if query.data == "repetir_selfie_inicio":
+            ud["pending_selfie_inicio_file_id"] = None
+            ud["paso"] = "esperando_selfie_inicio"
             ud.pop("botones_activos", None)
-            await query.edit_message_text("❌ Falta foto de inicio de actividades.")
-            return
-
-        # ✅ Buscar la fila por ID_REGISTRO
-        row = find_active_row(ssid, id_registro)
-        if not row:
-            await query.edit_message_text("⚠️ No encontré tu registro activo.")
-            return
-
-        try:
-            tg_file = await context.bot.get_file(fid)
-            buff = io.BytesIO()
-            await tg_file.download_to_memory(out=buff)
-            buff.seek(0)
-
-            filename = f"selfie_inicio_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
-            loop = asyncio.get_running_loop()
-            link = await loop.run_in_executor(
-                None,
-                lambda: comprimir_y_subir(buff, filename, ssid, row, "FOTO INICIO CUADRILLA")
-            )
-
-            # Hora de ingreso
-            hora = datetime.now(LIMA_TZ).strftime("%H:%M")
-            update_single_cell(ssid, SHEET_TITLE, COL["HORA INGRESO"], row, hora)
-            ud["hora_ingreso"] = hora
-
-            logger.info(
-                f"[EVIDENCIA] USER_ID={chat_id} | ID_REGISTRO={ud.get('id_registro')} "
-                f"| Paso=Selfie INICIO | Hora={hora} | Row={row} | file_id={fid}"
-            )
-
-            # Pedir ubicación en tiempo real
-            ud["paso"] = "esperando_live_inicio"
-            ud.pop("botones_activos", None)  # limpiar botones activos
-            ud.pop("pending_selfie_inicio_file_id", None)
-
-            gc.collect()
-            log_memoria("Después de confirmar Foto INICIO")
 
             try:
-                await query.edit_message_text(
-                f"✅ Fotografía registrada. ⏱️ Hora de inicio: <b>{hora}</b>.\n\n"
-                "📍 Ahora envía tu <b>ubicación en tiempo real</b>\n\n(Elige “Compartir ubicación en tiempo real” 📍).",
-                parse_mode="HTML"
-                )
-
+                await query.edit_message_text("🔄 Envía nuevamente tu foto de inicio de actividades.\n""📸 Recuerda que debe ser con tus <b>EPPs completos</b>.", parse_mode="HTML")
+            
             except Exception as e:
                 if "Message is not modified" in str(e):
-                    logger.warning(f"[handle_confirmar_selfie_inicio] Mensaje repetido ignorado (chat_id={chat_id})")
+                    logger.warning(f"[handle_confirmar_selfie_inicio] Botón repetido ignorado (chat_id={chat_id})")
                 else:
-                    raise  
+                    raise
+            return
+                
+        if query.data == "confirmar_selfie_inicio":
+            ssid, id_registro = ud.get("spreadsheet_id"), ud.get("id_registro")
+            fid = ud.get("pending_selfie_inicio_file_id")
+            if not (ssid and id_registro and fid):
+                ud.pop("botones_activos", None)
+                await query.edit_message_text("❌ Falta foto de inicio de actividades.")
+                return
 
-        except Exception as e:
-            logger.error(f"[ERROR] confirm_selfie_inicio upload: {e}")
-            await query.edit_message_text("⚠️ No pude registra tu foto.\n Reintenta enviando tu foto nuevamente.")
-        
+            # ✅ Buscar la fila por ID_REGISTRO
+            row = find_active_row(ssid, id_registro)
+            if not row:
+                await query.edit_message_text("⚠️ No encontré tu registro activo.")
+                return
+
+            try:
+                # Descargar de Telegram
+                tg_file = await context.bot.get_file(fid)
+                buff = io.BytesIO()
+                await tg_file.download_to_memory(out=buff)
+                buff.seek(0)
+
+                filename = f"selfie_inicio_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{row}.jpg"
+                loop = asyncio.get_running_loop()
+                link = await loop.run_in_executor(
+                    None,
+                    lambda: comprimir_y_subir(buff, filename, ssid, row, "FOTO INICIO CUADRILLA")
+                )
+
+                # Hora de ingreso
+                hora = datetime.now(LIMA_TZ).strftime("%H:%M")
+                update_single_cell(ssid, SHEET_TITLE, COL["HORA INGRESO"], row, hora)
+                ud["hora_ingreso"] = hora
+
+                logger.info(
+                    f"[EVIDENCIA] USER_ID={chat_id} | ID_REGISTRO={ud.get('id_registro')} "
+                    f"| Paso=Selfie INICIO | Hora={hora} | Row={row} | file_id={fid}"
+                )
+
+                # Pedir ubicación en tiempo real
+                ud["paso"] = "esperando_live_inicio"
+                ud.pop("botones_activos", None)  # limpiar botones activos
+                ud.pop("pending_selfie_inicio_file_id", None)
+
+                gc.collect()
+                log_memoria("Después de confirmar Foto INICIO")
+
+                try:
+                    await query.edit_message_text(
+                        f"✅ Fotografía registrada. ⏱️ Hora de salida: <b>{hora}</b>.\n\n"
+                        "📍 Ahora envía tu <b>ubicación en tiempo real</b>\n\n"
+                        "(Clip ➜ Ubicación ➜ Compartir ubicación en tiempo real 📍).",
+                    parse_mode="HTML"
+                    )
+
+                except Exception as e:
+                    if "Message is not modified" in str(e):
+                        logger.warning(f"[handle_confirmar_selfie_inicio] Mensaje repetido ignorado (chat_id={chat_id})")
+                    else:
+                        raise  
+
+            except Exception as e:
+                logger.error(f"[ERROR] confirm_selfie_inicio upload: {e}")
+                await query.edit_message_text("⚠️ No pude registra tu foto.\n""Reenvíala nuevamente con tus EPPs completos.")
+
+    except Exception:
+        logger.exception("[handle_confirmar_selfie_inicio] Error inesperado")
+        try:
+            await query.message.reply_text(
+                "❌ Ocurrió un error inesperado.\n"
+                "Escribe /estado para que te indique en qué paso estás."
+            )
+        except Exception:
+            pass     
 
 
 async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1410,114 +1512,121 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
 
     # ⚡ Solo aceptar botones activos
     if query.data not in ud.get("botones_activos", []):
-        await query.answer("⚠️ Este botón ya no es válido.")
+        try:
+            await query.answer("⚠️ Este botón ya no es válido.")
+        except Exception:
+            pass
         return
 
     try:
-        await query.answer("Procesando foto de salida... ⏳")
-    except Exception:
-        pass
-
-    # --- Caso: repetir selfie ---
-    if query.data == "repetir_selfie_salida":
-        ud["pending_selfie_salida_file_id"] = None
-        ud["paso"] = "esperando_selfie_salida"
-        ud.pop("botones_activos", None)
-
         try:
-            await query.edit_message_text(
-                "🔄 Envía nuevamente tu <b>foto de salida</b> 📸",
-                parse_mode="HTML"
-            )
-        except Exception as e:
-            if "Message is not modified" in str(e):
-                logger.warning(f"[handle_confirmar_selfie_salida] Botón repetido ignorado (chat_id={chat_id})")
-            else:
-                raise
-        return
+            await query.answer("Procesando foto de salida... ⏳")
+        except Exception:
+            pass
 
-    # --- Caso: confirmar selfie ---
-    if query.data == "confirmar_selfie_salida":
-        ssid, id_registro = ud.get("spreadsheet_id"), ud.get("id_registro")
-        fid = ud.get("pending_selfie_salida_file_id")
-        if not (ssid and id_registro and fid):
-            await query.edit_message_text("❌ Falta tu foto de salida 👀")
+        # --- Caso: repetir selfie ---
+        if query.data == "repetir_selfie_salida":
+            ud["pending_selfie_salida_file_id"] = None
+            ud["paso"] = "esperando_selfie_salida"
+            ud.pop("botones_activos", None)
+
+            try:
+                await query.edit_message_text(
+                    "🔄 Envía nuevamente tu <b>foto de salida</b> 📸",
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                if "Message is not modified" in str(e):
+                    logger.warning(f"[handle_confirmar_selfie_salida] Botón repetido ignorado (chat_id={chat_id})")
+                else:
+                    raise
             return
+
+        # --- Caso: confirmar selfie ---
+        if query.data == "confirmar_selfie_salida":
+            ssid, id_registro = ud.get("spreadsheet_id"), ud.get("id_registro")
+            fid = ud.get("pending_selfie_salida_file_id")
+            if not (ssid and id_registro and fid):
+                await query.edit_message_text("❌ Falta tu foto de salida 👀")
+                return
 
         # ✅ Buscar la fila real por ID_REGISTRO
 
-        row = find_active_row(ssid, id_registro)
-        if not row:
-            await query.edit_message_text("⚠️ No encontré tu registro activo.")
-            return
+            row = find_active_row(ssid, id_registro)
+            if not row:
+                await query.edit_message_text("⚠️ No encontré tu registro activo.")
+                return
         
-        try:
-            # Descargar de Telegram
-            tg_file = await context.bot.get_file(fid)
-            buff = io.BytesIO()
-            await tg_file.download_to_memory(out=buff)
-            buff.seek(0)
+            try:
+                # Descargar de Telegram
+                tg_file = await context.bot.get_file(fid)
+                buff = io.BytesIO()
+                await tg_file.download_to_memory(out=buff)
+                buff.seek(0)
 
-            filename = f"selfie_salida_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{id_registro}.jpg"
+                filename = f"selfie_salida_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{id_registro}.jpg"
             
 
             # ✅ Subir con row correcto Procesar (comprimir + subir a Drive) en un executor
-            loop = asyncio.get_running_loop()
-            link = await loop.run_in_executor(
-                None,
-                lambda: comprimir_y_subir(buff, filename, ssid, row, "FOTO FIN CUADRILLA")
-            )
+                loop = asyncio.get_running_loop()
+                link = await loop.run_in_executor(
+                    None,
+                    lambda: comprimir_y_subir(buff, filename, ssid, row, "FOTO FIN CUADRILLA")
+                )
 
-            # Registrar hora de salida
-            hora = datetime.now(LIMA_TZ).strftime("%H:%M")
-            row = find_active_row(ssid, ud["id_registro"])
-            update_single_cell(ssid, SHEET_TITLE, COL["HORA SALIDA"], row, hora)
-            ud["hora_salida"] = hora
+                # Registrar hora de salida
+                hora = datetime.now(LIMA_TZ).strftime("%H:%M")
+                row = find_active_row(ssid, ud["id_registro"])
+                update_single_cell(ssid, SHEET_TITLE, COL["HORA SALIDA"], row, hora)
+                ud["hora_salida"] = hora
 
-            logger.info(
-                f"[EVIDENCIA] USER_ID={chat_id} | ID_REGISTRO={ud.get('id_registro')} "
-                f"| Paso=Selfie SALIDA | Hora={hora} | Row={row} | file_id={fid}"
-            )
+                logger.info(
+                    f"[EVIDENCIA] USER_ID={chat_id} | ID_REGISTRO={ud.get('id_registro')} "
+                    f"| Paso=Selfie SALIDA | Hora={hora} | Row={row} | file_id={fid}"
+                )
 
             # Avanzar paso
-            ud["paso"] = "esperando_live_salida"
-            ud.pop("botones_activos", None)  # limpiar botones activos
-            ud.pop("pending_selfie_salida_file_id", None)
+                ud["paso"] = "esperando_live_salida"
+                ud.pop("botones_activos", None)  # limpiar botones activos
+                ud.pop("pending_selfie_salida_file_id", None)
 
+                gc.collect()
+                log_memoria("Después de confirmar selfie SALIDA")
 
-            # 🧹 Limpiar memoria y medir
-            if "pending_selfie_salida_file_id" in ud:
-                del ud["pending_selfie_salida_file_id"]
-            
-            gc.collect()
-            log_memoria("Después de confirmar selfie SALIDA")
-
-            try:
-
-                await query.edit_message_text(
-                    f"✅ Fotografía registrada. ⏱️ Hora de salida: <b>{hora}</b>.\n\n"
-                    "📍 Ahora envía tu <b>ubicación en tiempo real</b>\n\n"
-                    "(Elige “Compartir ubicación en tiempo real” 📍).",
-                    parse_mode="HTML"
-                )
+                try:
+                    await query.edit_message_text(
+                        f"✅ Fotografía registrada. ⏱️ Hora de salida: <b>{hora}</b>.\n\n"
+                        "📍 Ahora envía tu <b>ubicación en tiempo real</b>\n\n"
+                        "(Clip ➜ Ubicación ➜ Compartir ubicación en tiempo real 📍).",
+                        parse_mode="HTML"
+                    )
                 
+                except Exception as e:
+                    if "Message is not modified" in str(e):
+                        logger.warning(f"[handle_confirmar_selfie_salida] Mensaje repetido ignorado (chat_id={chat_id})")
+                    else:
+                        raise
+
+                # 🚦 Aquí va la marca de finalización (solo si no es usuario de prueba)
+
+                if chat_id not in USUARIOS_TEST:
+                    marcar_registro_completo(chat_id)
+
             except Exception as e:
-                if "Message is not modified" in str(e):
-                    logger.warning(f"[handle_confirmar_selfie_salida] Mensaje repetido ignorado (chat_id={chat_id})")
-                else:
-                    raise
+                logger.error(f"[ERROR] confirm_selfie_salida upload: {e}")
+                await query.edit_message_text(
+                    "⚠️ No pude registrar tu foto de salida.\n""Reenvíala nuevamente con tus EPPs completos."
+                )
 
-
-            # 🚦 Aquí va la marca de finalización (solo si no es usuario de prueba)
-
-            if chat_id not in USUARIOS_TEST:
-                marcar_registro_completo(chat_id)
-
-        except Exception as e:
-            logger.error(f"[ERROR] confirm_selfie_salida upload: {e}")
-            await query.edit_message_text(
-                "⚠️ No pude registrar tu foto de salida.\nReintenta enviadola de nuevo."
+    except Exception:
+        logger.exception("[handle_confirmar_selfie_salida] Error inesperado")
+        try:
+            await query.message.reply_text(
+                "❌ Ocurrió un error inesperado.\n"
+                "Escribe /estado para que te indique en qué paso estás."
             )
+        except Exception:
+            pass
 
 #==================LOG RAM===========
 
@@ -1525,31 +1634,32 @@ def log_memoria(contexto=""):
     logger.info(f"[MEMORIA] {contexto}")
 
 # ================== CALLBACKS / AYUDA (placeholder) ==================
-async def manejar_repeticiones(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    pass
 
 async def handle_ayuda_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query or not es_chat_privado(update):
         return
 
-    await query.answer()
+    await query.answer("Procesando… ⏳")
     await query.edit_message_text(
         "⚠️⚠️ <b>¡Usa los comandos o botones para registrar tu asistencia paso a paso!</b>\n\n"
         "Comienza con /ingreso y sigue la secuencia para que tu asistencia se registre correctamente. ✅✅",
         parse_mode="HTML"
     )
 
-def subir_con_reintentos(buff, filename, ssid, row, header, intentos=3):
+async def subir_con_reintentos(buff, filename, ssid, row, header, intentos=3):
+    loop = asyncio.get_running_loop()
     for i in range(intentos):
         try:
-            return comprimir_y_subir(buff, filename, ssid, row, header)
+            return await loop.run_in_executor(
+                None,
+                lambda: comprimir_y_subir(buff, filename, ssid, row, header)
+            )
         except Exception as e:
             logger.warning(f"[WARN] Falló intento {i+1}/{intentos} al subir {filename}: {e}")
             if i == intentos - 1:
                 raise
-            import time; time.sleep(2 * (i+1))  # backoff exponencial
-
+            await asyncio.sleep(2 * (i+1))  # backoff exponencial
 
 # ================== MAIN ==================
 def main():
@@ -1587,7 +1697,6 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_confirmar_tipo, pattern="^(confirmar_tipo|corregir_tipo)$"))
     app.add_handler(CallbackQueryHandler(handle_nombre_cuadrilla, pattern="^(confirmar_nombre|corregir_nombre)$"))
     app.add_handler(CallbackQueryHandler(handle_tipo_cuadrilla, pattern="^tipo_(disp|reg)$"))
-    app.add_handler(CallbackQueryHandler(manejar_repeticiones, pattern="^repetir_"))
 
     # --- ERRORES ---
     app.add_error_handler(log_error)
