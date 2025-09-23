@@ -568,8 +568,8 @@ def mostrar_botonera(paso: str):
     
     return None
 
-#====================== ESTADO =================
 
+#====================== ESTADO =================
 async def estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     ud = user_data.get(chat_id, {})
@@ -582,10 +582,12 @@ async def estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-     # ✅ Recuperar mensaje del paso actual
-    msg = PASOS.get(paso, {}).get("mensaje")
-    if not msg:
-        msg = "🧐🧐 Tienes un registro activo pendiente.\nUsa /estado para ver en qué paso te encuentras. 💪💪"
+    # ✅ Recuperar mensaje del paso actual
+    if paso in PASOS:
+        msg = PASOS[paso]["mensaje"]
+    else:
+        logger.warning(f"[ESTADO] Paso desconocido: {paso}")
+        msg = f"⚠️ Estás en un paso no reconocido: <b>{paso}</b>.\nUsa /ingreso para reiniciar el flujo."
 
     # ✅ Mostrar botonera si corresponde
     kb = mostrar_botonera(paso)
