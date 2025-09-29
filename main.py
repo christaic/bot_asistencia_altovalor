@@ -1,6 +1,7 @@
 import uuid
 import asyncio
-import unicodedata, re
+import unicodedata
+import re
 import os
 import io
 import json
@@ -1167,6 +1168,7 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     chat_id = update.effective_chat.id
+    user = update.effective_user
 
     # 🚦 Validación: solo aceptar UBICACIÓN en este paso
     if not await validar_flujo(update, chat_id):
@@ -1177,12 +1179,14 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     id_registro = ud.get("id_registro")
     if not ssid or not id_registro:
         await update.message.reply_text("⚠️ No encontré tu registro activo. Usa /ingreso para iniciar de nuevo.")
+        logger.warning(f"[UBICACIÓN] {user.username} ({chat_id}) intentó sin registro activo")
         return
 
     # Buscar la fila activa en Sheets (más robusto que confiar solo en RAM)
     row = find_active_row(ssid, id_registro)
     if not row:
         await update.message.reply_text("⚠️ Tuvimos un problema. Usa /ingreso para iniciar de nuevo.")
+        logger.error(f"[UBICACIÓN] No se encontró row activo para {chat_id}")
         return
 
     loc = update.message.location
@@ -1206,7 +1210,6 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"[EVIDENCIA] USER_ID={chat_id} | ID_REGISTRO={ud.get('id_registro')} "
                 f"| Paso=Ubicación INICIO | Lat={lat:.6f}, Lon={lon:.6f} | Row={row}"
             )
-        
             ud["paso"] = "en_jornada"   # jornada abierta hasta /salida
             user_data[chat_id] = ud
 
@@ -1220,19 +1223,17 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if ud.get("paso") == "esperando_live_salida":
             update_single_cell(ssid, SHEET_TITLE, COL["LATITUD SALIDA"], row, f"{lat:.6f}")
             update_single_cell(ssid, SHEET_TITLE, COL["LONGITUD SALIDA"], row, f"{lon:.6f}")
-
             logger.info(
                 f"[EVIDENCIA] USER_ID={chat_id} | ID_REGISTRO={ud.get('id_registro')} "
                 f"| Paso=Ubicación SALIDA | Lat={lat:.6f}, Lon={lon:.6f} | Row={row}"
             )
-
+            # 🚦 Marcar finalización aquí
             ud["paso"] = "finalizado"
             user_data[chat_id] = ud
-
-        # ✅ Marcar registro como completo (excepto usuarios de prueba)
             if chat_id not in USUARIOS_TEST:
                 marcar_registro_completo(chat_id)
-        
+            logger.info(f"[FINALIZADO] Registro cerrado para {chat_id} en row {row}")
+
             await update.message.reply_text(
                 "✅ Ubicación de salida registrada.\n\n"
                 "👷‍♂️ Jornada finalizada.\n"
@@ -1250,11 +1251,14 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-
-
 # ================== SALIDA ==================
 
 async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    chat_id = update.effective_chat.id
+    # 📌 Log inicial → confirma que el comando llegó al bot
+    logger.info(f"📌 /salida recibido de {user.username} ({user.id}) en chat {chat_id} a las {datetime.now()}")
+
     if not es_chat_privado(update):
         return
     
@@ -1267,6 +1271,7 @@ async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "⚠️ No puedes usar <b>/salida</b> sin antes haber completado tu registro de <b>/ingreso</b>.",
             parse_mode="HTML"
         )
+        logger.warning(f"[SALIDA BLOQUEADA] Usuario {user.id} intentó sin ingreso previo")
         return
 
     # 🚦 Validar horario laboral (excepto usuarios de prueba)
@@ -1275,6 +1280,7 @@ async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "⚠️ Solo puedes registrar tu <b>asistencia</b> entre las <b>07:00 AM y 11:30 PM</b>.",
             parse_mode="HTML"
         )
+        logger.warning(f"[SALIDA BLOQUEADA] Usuario {user.id} fuera de horario")
         return 
 
     # 🚦 Validar pasos obligatorios antes de permitir salida
@@ -1293,6 +1299,7 @@ async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 🚦 Si ya está finalizado, bloquear
     if ud.get("paso") == "finalizado":
         await update.message.reply_text("✅ Ya completaste tu registro hoy. No puedes registrar otra salida hasta mañana.")
+        logger.info(f"[SALIDA YA FINALIZADA] Usuario {user.id}")
         return
     
     # ✅ Si cumplió con lo mínimo → permitir selfie de salida
@@ -1300,9 +1307,10 @@ async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
     row = find_active_row(ssid, ud.get("id_registro"))
     if not row:
         await update.message.reply_text("⚠️ No encontré tu registro activo. ¿Seguro que hiciste /ingreso?")
+        logger.error(f"[SALIDA ERROR] No encontré fila activa para {user.id}")
         return
 
-     # 🔐 Actualizar estado
+    # 🔐 Actualizar estado
     ud["row"] = row
     ud["paso"] = "esperando_selfie_salida"
     ud["botones_activos"] = ["confirmar_selfie_salida", "repetir_selfie_salida"]
@@ -1581,26 +1589,36 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
 
                 filename = f"selfie_salida_{datetime.now(LIMA_TZ).strftime('%Y%m%d_%H%M%S')}_{chat_id}_{id_registro}.jpg"
             
+            # ✅ Subir con row correcto Procesar (comprimir + subir a Drive) en un executor
+                logger.info(f"[SELFIE] Procesando selfie de salida de {chat_id} (row={row})")
 
             # ✅ Subir con row correcto Procesar (comprimir + subir a Drive) en un executor
                 loop = asyncio.get_running_loop()
                 link = await loop.run_in_executor(
                     None,
-                    lambda: comprimir_y_subir(buff, filename, ssid, row, "FOTO FIN CUADRILLA")
-                )
+                    lambda: comprimir_y_subir(buff, filename, ssid, row, "FOTO FIN CUADRILLA"))
+                if link:
+                    logger.info(f"[DRIVE] Foto de salida subida OK para {chat_id} | Link={link}")
+                else:
+                    logger.error(f"[DRIVE] Falló subida de selfie salida para {chat_id}")
 
+                try:
                 # Registrar hora de salida
-                hora = datetime.now(LIMA_TZ).strftime("%H:%M")
-                row = find_active_row(ssid, ud["id_registro"])
-                update_single_cell(ssid, SHEET_TITLE, COL["HORA SALIDA"], row, hora)
-                ud["hora_salida"] = hora
+                    hora = datetime.now(LIMA_TZ).strftime("%H:%M")
+                    row = find_active_row(ssid, ud["id_registro"])
+                    update_single_cell(ssid, SHEET_TITLE, COL["HORA SALIDA"], row, hora)
+                    ud["hora_salida"] = hora
+                    logger.info(f"[EXCEL] Hora de salida registrada {hora} en row {row} para {chat_id}")
+                except Exception as e:
+                    logger.error(f"[ERROR] No se pudo actualizar hora salida en Excel: {e}", exc_info=True)
 
+                # Siempre log de evidencia, aunque falle Excel
                 logger.info(
                     f"[EVIDENCIA] USER_ID={chat_id} | ID_REGISTRO={ud.get('id_registro')} "
                     f"| Paso=Selfie SALIDA | Hora={hora} | Row={row} | file_id={fid}"
-                )
+                    )
 
-            # Avanzar paso
+                # Avanzar paso
                 ud["paso"] = "esperando_live_salida"
                 ud.pop("botones_activos", None)  # limpiar botones activos
                 ud.pop("pending_selfie_salida_file_id", None)
@@ -1622,17 +1640,11 @@ async def handle_confirmar_selfie_salida(update: Update, context: ContextTypes.D
                     else:
                         raise
 
-                # 🚦 Aquí va la marca de finalización (solo si no es usuario de prueba)
-
-                if chat_id not in USUARIOS_TEST:
-                    marcar_registro_completo(chat_id)
-
             except Exception as e:
                 logger.error(f"[ERROR] confirm_selfie_salida upload: {e}")
                 await query.edit_message_text(
                     "⚠️ No pude registrar tu foto de salida.\n""Reenvíala nuevamente con tus EPPs completos."
                 )
-
     except Exception:
         logger.exception("[handle_confirmar_selfie_salida] Error inesperado")
         try:
