@@ -23,8 +23,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from pytz import timezone
-
-
+from dotenv import load_dotenv
 
 #== RESET REGISTRO 00:00==
 
