@@ -83,12 +83,10 @@ def marcar_registro_completo(chat_id: int):
     """Marca que el usuario completó su registro hoy"""
     registro_diario[chat_id] = date.today().isoformat()
 
-
-load_dotenv()
-
 # ================== ZONA HORARIA ==================
 LIMA_TZ = timezone("America/Lima")
 
+load_dotenv()
 # ================== CONFIGURACIÓN ==================
 BOT_TOKEN = os.getenv("BOT_TOKEN")  # Token del bot
 NOMBRE_CARPETA_DRIVE = "ASISTENCIA_SGA_ALTOVALOR"
