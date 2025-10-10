@@ -1,15 +1,14 @@
 import uuid
 import asyncio
-import unicodedata
 import re
 import os
 import io
+import gc
 import json
 import logging
 from datetime import datetime
 from datetime import date
 from PIL import Image
-import gc
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -71,10 +70,6 @@ def comprimir_y_subir(buff: io.BytesIO, filename: str, ssid: str, row: int, head
         logger.error(f"[ERROR] comprimir_y_subir: {e}")
         raise
 
-
-def log_memoria(contexto=""):
-    logger.info(f"[MEMORIA] {contexto}")
-
 # Control de registros diarios (chat_id -> fecha último registro finalizado)
 
 registro_diario = {}
@@ -92,7 +87,7 @@ def marcar_registro_completo(chat_id: int):
 LIMA_TZ = timezone("America/Lima")
 
 # ================== CONFIGURACIÓN ==================
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # Token del bot
+BOT_TOKEN = "8426434999:AAF8JQDhkWBbcaLqxtdIWGjj1-j2wmToWVU"  # Token del bot
 NOMBRE_CARPETA_DRIVE = "ASISTENCIA_SGA_ALTOVALOR"
 DRIVE_ID = "0AN8pG_lPt1dtUk9PVA"
 GLOBAL_SHEET_NAME = "ASISTENCIA_CUADRILLAS_DISP_ALTO_VALOR"
@@ -100,6 +95,10 @@ USUARIOS_TEST = {7175478712, 7286377190}
 
 # Carga de credenciales desde variable de entorno
 CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+
+# ================== GOOGLE MAPS API ==================
+GOOGLE_MAPS_API_KEY = "AIzaSyCLcEElUO_4khY4DmNeOLpqutk-yVFHF7c"
+
 
 # 🔎 Verificación temprana de variables críticas
 if not BOT_TOKEN:
@@ -159,7 +158,7 @@ def get_or_create_main_folder():
     ).execute()
     return folder["id"]
 
-MAIN_FOLDER_ID = get_or_create_main_folder()
+MAIN_FOLDER_ID = "1OKL_s5Qs8VXbmhWFPDiJBqaaQArKQGG7"
 
 def get_or_create_images_folder():
     """Crea/obtiene subcarpeta IMAGENES dentro de la carpeta principal."""
@@ -227,6 +226,49 @@ def ensure_global_spreadsheet() -> str:
     ).execute()
     return created["id"]
 
+def ensure_asistencia_cuadrillas_v1():
+    """
+    Verifica que el archivo 'ASISTENCIA_CUADRILLAS_DISP_ALTO_VALOR' exista dentro de la carpeta principal.
+    Devuelve su file_id listo para escribir con los HEADERS globales.
+    Si no existe, lanza advertencia y no crea nada nuevo.
+    """
+    nombre_archivo = "ASISTENCIA_CUADRILLAS_DISP_ALTO_VALOR"
+    query = (
+        f"name='{nombre_archivo}' and '{MAIN_FOLDER_ID}' in parents and "
+        f"mimeType='application/vnd.google-apps.spreadsheet' and trashed=false"
+    )
+
+    res = drive_service.files().list(
+        q=query,
+        fields="files(id, name)",
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True
+    ).execute()
+
+    files = res.get("files", [])
+
+    if not files:
+        logger.error("❌ No se encontró el archivo 'ASISTENCIA_CUADRILLAS_DISP_ALTO_VALOR' en Drive. Verifica que exista.")
+        return None
+
+    ssid = files[0]["id"]
+    logger.info(f"📄 Archivo '{nombre_archivo}' encontrado en Drive (ID={ssid}).")
+
+    # ✅ Verificar encabezados (solo si quieres asegurarte que están correctos)
+    try:
+        sheets_service.spreadsheets().values().update(
+            spreadsheetId=ssid,
+            range="A1:V1",
+            valueInputOption="RAW",
+            body={"values": [HEADERS]},
+        ).execute()
+        logger.info(f"🧾 Encabezados verificados/actualizados en '{nombre_archivo}'.")
+    except Exception as e:
+        logger.warning(f"⚠️ No se pudieron escribir encabezados en '{nombre_archivo}': {e}")
+
+    return ssid
+
+
 # ---- Subida de imagen a Drive y enlace clicable ----
 
 def upload_image_and_get_link(image_bytes: io.BytesIO, filename: str, max_retries: int = 3) -> str:
@@ -279,50 +321,139 @@ def upload_image_and_get_link(image_bytes: io.BytesIO, filename: str, max_retrie
                 raise
             import time; time.sleep(2 * (intento + 1))  # backoff exponencial
 
+def buscar_datos_cuadrilla(codigo: str):
+    """
+    Busca el código en la hoja CUADRILLAS ACTIVAS y devuelve un dict con
+    CUADRILLA, PROVEEDOR, ZONA si lo encuentra. Caso contrario, None.
+    """
+    try:
+        archivo = buscar_archivo_en_drive("CUADRILLAS ACTIVAS", SHEET_MIME)
+        if not archivo:
+            logger.error("❌ No se encontró el archivo 'CUADRILLAS ACTIVAS' en Drive.")
+            return None
+
+        ssid = archivo["id"]
+        rango = "A:W"  # buscamos hasta la columna W
+        data = sheets_service.spreadsheets().values().get(
+            spreadsheetId=ssid, range=rango
+        ).execute()
+
+        values = data.get("values", [])
+        for fila in values:
+            if len(fila) < 23 or not fila[0].strip():  # asegurar que llega hasta W
+                continue
+            if fila[0].strip() == str(codigo).strip():  # Columna A: código
+                cuadrilla = fila[1] if len(fila) > 1 else ""
+                proveedor = fila[11] if len(fila) > 11 else ""
+                zona = fila[22] if len(fila) > 22 else ""
+                return {"CUADRILLA": cuadrilla, "PROVEEDOR": proveedor, "ZONA": zona}
+
+        logger.warning(f"[CUADRILLAS] Código {codigo} no encontrado.")
+        return None
+    except Exception as e:
+        logger.error(f"[ERROR] buscar_datos_cuadrilla: {e}")
+        return None
+
+import requests
+
+def obtener_ubicacion_detallada(lat, lon):
+    """
+    Devuelve un dict con departamento, provincia y distrito usando Google Geocoding API.
+    """
+    try:
+        url = f"https://maps.googleapis.com/maps/api/geocode/json?latlng={lat},{lon}&key={GOOGLE_MAPS_API_KEY}&language=es"
+        resp = requests.get(url)
+        data = resp.json()
+
+        if not data.get("results"):
+            return {"departamento": "", "provincia": "", "distrito": ""}
+
+        # Buscar componentes administrativos
+        components = data["results"][0]["address_components"]
+        departamento = provincia = distrito = ""
+
+        for comp in components:
+            if "administrative_area_level_1" in comp["types"]:
+                departamento = comp["long_name"]
+            elif "administrative_area_level_2" in comp["types"]:
+                provincia = comp["long_name"]
+            elif "locality" in comp["types"] or "sublocality" in comp["types"]:
+                distrito = comp["long_name"]
+
+        return {
+            "departamento": departamento,
+            "provincia": provincia,
+            "distrito": distrito
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Error obteniendo ubicación detallada: {e}")
+        return {"departamento": "", "provincia": "", "distrito": ""}
+
 # ================== GOOGLE SHEETS ==================
 SHEET_TITLE = "Registros"
 
-# Cabezera sin "MES"; columnas para URL de selfies
+# ================== CABECERAS PRINCIPALES ==================
 HEADERS = [
     "ID_REGISTRO",
     "USER_ID",
     "FECHA",
+    "ID_PHOENIX",
     "CUADRILLA",
-    "TIPO DE CUADRILLA",   # Disponibilidad | Regular
-    "FOTO INICIO CUADRILLA",    # URL clicable en Drive
+    "PROVEEDOR",
+    "ZONA",
+    "TIPO DE CUADRILLA",
+    "FOTO INICIO CUADRILLA",
     "LATITUD",
     "LONGITUD",
+    "DEPARTAMENTO",
+    "PROVINCIA",
+    "DISTRITO",
     "HORA INGRESO",
     "HORA SALIDA",
-    "FOTO FIN CUADRILLA",       # URL clicable en Drive
+    "FOTO FIN CUADRILLA",
     "LATITUD SALIDA",
     "LONGITUD SALIDA",
+    "DEPARTAMENTO SALIDA",
+    "PROVINCIA SALIDA",
+    "DISTRITO SALIDA"
 ]
 
+
+# ================== MAPA DE COLUMNAS ==================
 COL = {
     "ID_REGISTRO": "A",
-    "USER_ID": "B",                 # 👈 Nueva columna
+    "USER_ID": "B",
     "FECHA": "C",
-    "CUADRILLA": "D",
-    "TIPO DE CUADRILLA": "E",
-    "FOTO INICIO CUADRILLA": "F",
-    "LATITUD": "G",
-    "LONGITUD": "H",
-    "HORA INGRESO": "I",
-    "HORA SALIDA": "J",
-    "FOTO FIN CUADRILLA": "K",
-    "LATITUD SALIDA": "L",
-    "LONGITUD SALIDA": "M",
+    "ID_PHOENIX": "D",
+    "CUADRILLA": "E",
+    "PROVEEDOR": "F",
+    "ZONA": "G",
+    "TIPO DE CUADRILLA": "H",
+    "FOTO INICIO CUADRILLA": "I",
+    "LATITUD": "J",
+    "LONGITUD": "K",
+    "DEPARTAMENTO": "L",
+    "PROVINCIA": "M",
+    "DISTRITO": "N",
+    "HORA INGRESO": "O",
+    "HORA SALIDA": "P",
+    "FOTO FIN CUADRILLA": "Q",
+    "LATITUD SALIDA": "R",
+    "LONGITUD SALIDA": "S",
+    "DEPARTAMENTO SALIDA": "T",
+    "PROVINCIA SALIDA": "U",
+    "DISTRITO SALIDA": "V",
 }
 
 
 PASOS = {
     "esperando_cuadrilla": {
-        "mensaje": "🧐🧐 Aquí debes escribir el nombre de tu cuadrilla.👷‍♂️👷‍♀️\n\n""✏️ Recuerda ingresarlo como aparece en PHOENIX.\n\n"
-        "Ejemplo:\n\n D 1 WIN SGA CHRISTOPHER INGA CONTRERAS\nD 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA"
+        "mensaje": "🧐🧐 Aquí debes escribir el ID Phoenix de tu cuadrilla.👷‍♂️👷‍♀️\n\n""✏️ Recuerda ingresar tu ID PHOENIX.\n\n"
+        "Ejemplo:\n\n0\n11\n9999"
     },
     "confirmar_nombre": {
-        "mensaje": "👉 Confirma o corrige el nombre de tu cuadrilla usando los botones. 👇"
+        "mensaje": "👉 Confirma o corrige el ID Phoenix de tu cuadrilla usando los botones. 👇"
     },
     "confirmar_tipo": {
         "mensaje": "👉 Confirma o corrige el <b>tipo de cuadrilla</b> usando los botones. 👇 "
@@ -358,9 +489,9 @@ PASOS = {
 
 
 def dentro_horario_laboral() -> bool:
-    """True si la hora actual está dentro de 07:00 - 23:30 Lima."""
+    """True si la hora actual está dentro de 07:00 - 23:59 Lima."""
     ahora = datetime.now(LIMA_TZ).time()
-    return datetime.strptime("07:00", "%H:%M").time() <= ahora <= datetime.strptime("23:30", "%H:%M").time()
+    return datetime.strptime("07:00", "%H:%M").time() <= ahora <= datetime.strptime("23:59", "%H:%M").time()
 
 
 def ensure_sheet_and_headers(spreadsheet_id: str):
@@ -389,13 +520,13 @@ def ensure_sheet_and_headers(spreadsheet_id: str):
     # Escribir headers si hacen falta
     vr = sheets_service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
-        range=f"{SHEET_TITLE}!A1:M1"
+        range=f"{SHEET_TITLE}!A1:V1"
     ).execute()
     row = vr.get("values", [])
     if not row or row[0] != HEADERS:
         sheets_service.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id,
-            range=f"{SHEET_TITLE}!A1:M1",
+            range=f"{SHEET_TITLE}!A1:V1",
             valueInputOption="RAW",
             body={"values": [HEADERS]}
         ).execute()
@@ -437,7 +568,10 @@ def append_base_row(spreadsheet_id: str, data: dict, chat_id: int) -> int:
         "ID_REGISTRO": id_registro,
         "USER_ID": str(chat_id),
         "FECHA": ahora.strftime("%Y-%m-%d"),
+        "ID_PHOENIX": data.get("ID_PHOENIX", ""),
         "CUADRILLA": data.get("CUADRILLA", ""),
+        "PROVEEDOR": data.get("PROVEEDOR", ""),
+        "ZONA": data.get("ZONA", ""),
         "TIPO DE CUADRILLA": data.get("TIPO DE CUADRILLA", ""),
         "FOTO INICIO CUADRILLA": "",
         "LATITUD": "",
@@ -604,7 +738,7 @@ async def estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================== VALIDACIONES ==================
 async def validar_contenido(update: Update, tipo: str):
     if tipo == "texto" and not update.message.text:
-        await update.message.reply_text("⚠️ Debes enviar el nombre de tu cuadrilla en texto. ✍️")
+        await update.message.reply_text("⚠️ Debes enviar el ID Phoenix de tu cuadrilla en texto. ✍️")
         return False
     if tipo == "foto" and not update.message.photo:
         await update.message.reply_text("⚠️ Debes enviar una foto, no texto. 🤳")
@@ -718,117 +852,194 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(msg, parse_mode="HTML")
         return
 
-    # 🚦 Caso: no hay registro activo → bienvenida con comandos
+    # 🚀 Bienvenida general
     comandos = (
-        "👋 ¡Hola! Bienvenido al bot de asistencia SGA - WIN 👷‍♂️👷‍♀️\n\n"
-        "ℹ️ Instrucciones para uso del bot:\n\n"
-        "1️⃣ Usa /ingreso para registrar tu Inicio de jornada laboral 👷‍♂️:\n"
-        "   - Envía el nombre de tu cuadrilla ✍️\n"
-        "   - Luego la foto de inicio de actividades 📸\n"
-        "   - Ubicación en tiempo real 📍\n\n"
-        "2️⃣ Usa /salida para tu Fin de jornada laboral 👷‍♂️:\n"
-        "   - Envía la foto de fin de actividades 📸\n"
-        "   - Ubicación en tiempo real 📍\n\n"
-        "ℹ️ Usa /estado para ver el paso en el que te encuentras 💪\n\n"
-        "❗ El flujo es estricto, no puedes saltarte pasos. 😉"
+        "👋 ¡Hola, técnico WIN SGA! Bienvenido al bot de asistencia 👷‍♂️👷‍♀️\n\n"
+        "🧾 <b>Cómo funciona:</b>\n\n"
+        "1️⃣ Usa /ingreso para registrar tu <b>Inicio de jornada laboral</b>.\n"
+        "   - Ingresa tu <b>ID_PHOENIX</b> 🪪 (código de 1 a 4 dígitos de tu cuadrilla).\n"
+        "   - El bot cargará automáticamente tus datos (cuadrilla, proveedor, zona).\n\n"
+        "2️⃣ Luego selecciona tu <b>tipo de cuadrilla</b> 🟠 DISPONIBILIDAD o ⚪ REGULAR.\n\n"
+        "3️⃣ Envía tus fotos y ubicación en tiempo real cuando se te indique 📸📍.\n\n"
+        "4️⃣ Usa /salida para registrar el <b>Fin de jornada laboral</b> 🏁.\n\n"
+        "📌 Puedes usar /estado en cualquier momento para saber en qué paso estás 💪.\n\n"
+        "⚙️ El flujo es automático, no te preocupes. Yo te iré guiando paso a paso 😉"
     )
 
     await update.message.reply_text(comandos, parse_mode="HTML")
 
 
+# ================== COMANDO /AYUDA ==================
 async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not es_chat_privado(update):
         return
 
     texto = (
-        "👋 ¡Hola! Soy tu bot de asistencia WIN 👷‍♂️👷‍♀️\n\n"
-        "ℹ️ Instrucciones para uso del bot:\n\n"
-        "1️⃣ Usa /ingreso para registrar tu Inicio de jornada laboral 👷‍♂️\n"
-        "   - Envia el nombre de tu cuadrilla ✍️\n"
-        "   - Luego la foto de inicio de actividades 📸\n"
-        "   - Ubicación en tiempo real 📍\n\n"
-        "2️⃣ Usa /salida para registrar tu Fin de jornada laboral 👷‍♂️:\n"
-        "   - Envía la foto de fin de actividades 📸\n"
-        "   - Ubicación en tiempo real 📍\n\n"
-        "📌 Usa /estado para ver en qué paso del flujo te encuentras 💪\n\n"
-        "‼️ El flujo es estricto, no puedes saltarte pasos 😅"
+        "🧾 <b>ASISTENCIA DIGITAL - WIN SGA</b> 👷‍♂️👷‍♀️\n\n"
+        "💡 <b>Guía rápida de uso del bot:</b>\n\n"
+        "1️⃣ Usa /ingreso para registrar tu <b>Inicio de jornada laboral</b>.\n"
+        "   ➤ Ingresa tu <b>ID_PHOENIX</b> 🪪 (código de 1 a 4 dígitos de tu cuadrilla).\n"
+        "   ➤ El bot cargará automáticamente tus datos: cuadrilla, proveedor y zona.\n\n"
+        "2️⃣ Luego selecciona el <b>tipo de cuadrilla</b> 🟠 DISPONIBILIDAD o ⚪ REGULAR.\n\n"
+        "3️⃣ Envía tus fotos y ubicación en tiempo real cuando se te indique 📸📍.\n\n"
+        "4️⃣ Usa /salida para registrar tu <b>Fin de jornada</b> 🏁.\n\n"
+        "📌 En cualquier momento puedes usar /estado para ver en qué paso estás 💪.\n\n"
+        "⚙️ Todo el flujo es automático, no puedes saltar pasos — solo sigue las indicaciones 😉.\n\n"
+        "📢 Si necesitas soporte adicional, contacta con el área de supervisión técnica WIN."
     )
 
     await update.message.reply_text(texto, parse_mode="HTML")
 
 
+
 # ================== INGRESO ==================
+
 async def ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not es_chat_privado(update):
         return
+
     chat_id = update.effective_chat.id
     ud = user_data.get(chat_id, {})
 
-        # 🚦 Validar horario laboral
+    # 🚦 Validar horario laboral
     if chat_id not in USUARIOS_TEST and not dentro_horario_laboral():
         await update.message.reply_text(
-            "⚠️ Solo puedes registrar tu asistencia entre las <b>07:00 AM y 11:30 PM</b>.",
+            "⚠️ Solo puedes registrar tu asistencia entre las <b>07:00 AM y 11:59 PM</b>.",
             parse_mode="HTML"
         )
         return
 
-
-    # 🚦 1. Si ya está en medio de un registro y no ha hecho salida, no permitir nuevo ingreso
+    # 🚦 Si ya está en medio de un registro
     if ud.get("paso") not in (None, "finalizado"):
         paso = ud.get("paso")
         msg = PASOS.get(paso, {}).get(
-            "mensaje", "⚠️ Ya tienes un registro en curso.\n\nPara ver el estado de tu registro presiona:\n\n🆘 /estado para ayudarte en que paso te encuentras o\n 🛫 /salida para finalizar jornada."
+            "mensaje",
+            "⚠️ Ya tienes un registro en curso.\n\n"
+            "Usa /estado para saber en qué paso estás 💪 o /salida para finalizar tu jornada 🏁"
         )
         await update.message.reply_text(msg, parse_mode="HTML")
         return
 
-
-    # 🚦 2. Si es usuario normal (no test) y ya registró hoy, bloquear
+    # 🚦 Si ya registró hoy (y no es usuario test)
     if chat_id not in USUARIOS_TEST and ya_registro_hoy(chat_id):
         await update.message.reply_text(
-            "⚠️ Ya completaste tu registro de hoy.\n\nDebes esperar hasta mañana para iniciar uno nuevo."
+            "⚠️ Ya completaste tu registro de hoy.\n\nDebes esperar hasta mañana para iniciar uno nuevo. 🌅"
         )
         return
 
-    # ✅ 3. Caso válido: iniciar nuevo flujo
+    # ✅ Inicio de flujo: pedir ID_PHOENIX
     user_data[chat_id] = {"paso": "esperando_cuadrilla"}
+
     await update.message.reply_text(
-        "✍️ Hola, escribe el <b>nombre de tu cuadrilla</b>.👷‍♂️👷‍♀️\n\n"
-        "✏️ Recuerda ingresarlo como aparece en <b>PHOENIX</b>.\n\n"
-        "Ejemplo:\n\n <b>D 1 WIN SGA CHRISTOPHER INGA CONTRERAS</b>\n <b>D 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA</b>",
+        "✍️ Hola, comencemos con tu registro 👷‍♂️👷‍♀️\n\n"
+        "Por favor, ingresa tu <b>ID PHOENIX</b> 🪪 (código de 1 a 4 dígitos asignado a tu cuadrilla).\n\n"
+        "Ejemplo:\n\n<b>0</b>\n<b>11</b>\n<b>9999</b>\n\n"
+        "✏️ Con este código tendré tus datos registrados 📘",
         parse_mode="HTML"
     )
 
-
-# ================== PASO 0: NOMBRE CUADRILLA ==================
+# ================== PASO 0: ID_PHOENIX ==================
 async def nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not es_chat_privado(update):
         return
     chat_id = update.effective_chat.id
-    
-    # 🚦 Validación: solo aceptar TEXTO en este paso
-    if not await validar_flujo(update, chat_id):
-        return    
-        
-    ud = user_data.setdefault(chat_id, {"paso": "esperando_cuadrilla"})
-    if ud.get("paso") != "esperando_cuadrilla":
+
+    texto = update.message.text.strip()
+
+    # 🚦 Validar que sea un código de 4 dígitos
+    if not re.fullmatch(r"\d{1,4}", texto):
+        await update.message.reply_text(
+            "⚠️ Debes ingresar tu <b>ID PHOENIX</b> (código de 1 a 4 dígitos numéricos).",
+            parse_mode="HTML"
+        )
         return
 
-    if not await validar_contenido(update, "texto"):
+    # 🔍 Buscar el código en la hoja CUADRILLAS ACTIVAS
+    datos = buscar_datos_cuadrilla(texto)
+    if not datos:
+        await update.message.reply_text(
+            "❌ No encontré ese ID_PHOENIX en el registro de cuadrillas activas.\n"
+            "Verifica el código y vuelve a intentarlo.",
+            parse_mode="HTML"
+        )
         return
 
-    ud["cuadrilla"] = update.message.text.strip()
-    
-    ud["paso"] = "confirmar_nombre"
-    ud["botones_activos"] = ["confirmar_nombre", "corregir_nombre"]
+    # ✅ Guardar datos obtenidos en memoria
+    ud = user_data.setdefault(chat_id, {})
+    ud.update({
+        "id_phoenix": texto,
+        "cuadrilla": datos["CUADRILLA"],
+        "proveedor": datos["PROVEEDOR"],
+        "zona": datos["ZONA"],
+        "paso": "confirmar_nombre",
+        "botones_activos": ["confirmar_nombre", "corregir_nombre"]
+    })
+
     await update.message.reply_text(
-        f"¿Has ingresado correctamente el nombre de tu cuadrilla 👷‍♂️? 🤔\n\n<b>{ud['cuadrilla']}</b>",
+        f"✅ <b>ID Phoenix:</b> {texto}\n"
+        f"<b>Cuadrilla:</b> {datos['CUADRILLA']}\n"
+        f"<b>Proveedor:</b> {datos['PROVEEDOR']}\n"
+        f"<b>Zona:</b> {datos['ZONA']}\n\n"
+        "¿Son correctos estos datos?",
         parse_mode="HTML",
-        reply_markup=mostrar_botonera("confirmar_nombre")
+        reply_markup=mostrar_botonera('confirmar_nombre')
     )
 
+# ================== FILTRO DE MENSAJES DE TEXTO ==================
+async def manejar_texto_fuera_de_lugar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Solo acepta ID_PHOENIX (1–4 dígitos) cuando el paso es 'esperando_cuadrilla'."""
+    if not es_chat_privado(update):
+        return
 
-# ===================== BOTONES CONFIRMAR/CORREGIR CUADRILLA =====================
+    chat_id = update.effective_chat.id
+    ud = user_data.get(chat_id, {})
+    paso = ud.get("paso")
+    texto = (update.message.text or "").strip()
+
+    # 🚫 Si el flujo ya terminó
+    if paso == "finalizado":
+        await update.message.reply_text(
+            "✅ Ya completaste tu registro hoy.\n\n"
+            "Mañana podrás iniciar uno nuevo con /ingreso 💪💪"
+        )
+        return
+
+    # ✅ SOLO aquí permitimos escribir el ID
+    if paso == "esperando_cuadrilla":
+        if not re.fullmatch(r"\d{1,4}", texto):
+            await update.message.reply_text(
+                "⚠️ Debes ingresar tu <b>ID PHOENIX</b> de 1 a 4 dígitos.",
+                parse_mode="HTML"
+            )
+            return
+        await nombre_cuadrilla(update, context)
+        return
+
+    # ⛔ En cualquier otro paso NO aceptamos texto como ID
+    if paso in ("confirmar_nombre", "tipo", "confirmar_tipo",
+                "confirmar_selfie_inicio", "confirmar_selfie_salida"):
+        kb = mostrar_botonera(paso)
+        if kb:
+            await update.message.reply_text(
+                "⚠️ Usa los botones para continuar. 👇",
+                reply_markup=kb,
+                parse_mode="HTML"
+            )
+        return
+
+    # Si no hay flujo o aún no inició
+    if paso is None:
+        await update.message.reply_text(
+            "👷‍♂️ Usa el comando /ingreso para iniciar tu registro de asistencia."
+        )
+        return
+
+    # Si el paso acepta texto (por ejemplo, campos personalizados)
+    msg = PASOS.get(paso, {}).get("mensaje")
+    if msg:
+        await update.message.reply_text(msg, parse_mode="HTML")
+
+# ===================== BOTONES CONFIRMAR/CORREGIR ID_PHOENIX =====================
 async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query or not es_chat_privado(update):
@@ -843,79 +1054,71 @@ async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_
         return
 
     try:
-        # feedback para confirmar que el callback llegó
         await query.answer("Procesando… ⏳")
 
+        # === CORREGIR ===
         if query.data == "corregir_nombre":
             ud["paso"] = "esperando_cuadrilla"
-            ud.pop("cuadrilla", None)           # limpiar nombre anterior
-            ud.pop("botones_activos", None)     # limpiar botones
+            ud.pop("id_phoenix", None)
+            ud.pop("cuadrilla", None)
+            ud.pop("proveedor", None)
+            ud.pop("zona", None)
+            ud.pop("botones_activos", None)
 
-            try:
-                await query.edit_message_text(
-                "✍️ <b>Hola, escribe el nombre de tu cuadrilla 👷‍♂️ nuevamente.</b>\n\n"
-                "✏️ Recuerda ingresarlo como aparece en <b>PHOENIX</b>.\n\n"
-                "Ejemplo:\n\n"
-                "<b>D 1 WIN SGA CHRISTOPHER INGA CONTRERAS</b>\n"
-                "<b>D 2 TRASLADO WIN SGA RICHARD PINEDO PALLARTA</b>",
+            await query.edit_message_text(
+                "✍️ Ingresa nuevamente tu <b>ID_PHOENIX</b> (código de 1 a 4 dígitos numéricos).",
                 parse_mode="HTML"
             )
-            except Exception as e:
-                if "Message is not modified" in str(e):
-                    logger.warning(f"[handle_nombre_cuadrilla] Mensaje repetido ignorado (chat_id={chat_id})")
-                else:
-                    raise 
             return
 
+        # === CONFIRMAR ===
         if query.data == "confirmar_nombre":
-            if not ud.get("cuadrilla"):
-                ud["paso"] = "esperando_cuadrilla" 
+            if not ud.get("id_phoenix"):
+                ud["paso"] = "esperando_cuadrilla"
                 ud.pop("botones_activos", None)
-                await query.edit_message_text("⚠️ No encontré el nombre. Escríbelo nuevamente por favor. ")
+                await query.edit_message_text("⚠️ No encontré el ID_PHOENIX. Escríbelo nuevamente por favor.")
                 return
 
-            # 1) Sheet global + headers
-            ssid = ensure_global_spreadsheet()
+            # 1️⃣ Garantizar el nuevo sheet
+            ssid = ensure_asistencia_cuadrillas_v1()
             ensure_sheet_and_headers(ssid)
             logger.info(f"[FLOW] usando ssid={ssid}")
 
-            # 2) Fila base (solo una vez)
+            # 2️⃣ Crear fila base con los datos del ID Phoenix
             if not ud.get("spreadsheet_id") or not ud.get("row"):
-                base = {"CUADRILLA": ud["cuadrilla"], "TIPO DE CUADRILLA": ""}
+                base = {
+                    "ID_PHOENIX": ud.get("id_phoenix", ""),
+                    "CUADRILLA": ud.get("cuadrilla", ""),
+                    "PROVEEDOR": ud.get("proveedor", ""),
+                    "ZONA": ud.get("zona", ""),
+                    "TIPO DE CUADRILLA": "",
+                }
                 row = append_base_row(ssid, base, chat_id)
                 ud["spreadsheet_id"] = ssid
                 ud["row"] = row
-                logger.info(f"[OK] Fila base creada: row={row}, cuadrilla='{ud['cuadrilla']}'")
-                logger.info(
-                    f"[EVIDENCIA] USER_ID={chat_id} | Paso=Nombre Cuadrilla | Cuadrilla='{ud.get('cuadrilla')}' | Row={row}"
-                )
+                logger.info(f"[OK] Registro base creado: row={row}, ID_PHOENIX={ud['id_phoenix']}")
 
-            # 3) Avanza a tipo de cuadrilla
+            # 3️⃣ Avanzar directamente al paso "tipo de cuadrilla"
             ud["paso"] = "tipo"
-            ud.pop("botones_activos", None)  # limpiar botones activos
+            ud.pop("botones_activos", None)
+
             keyboard = [
                 [InlineKeyboardButton("🟠 DISPONIBILIDAD", callback_data="tipo_disp")],
                 [InlineKeyboardButton("⚪ REGULAR", callback_data="tipo_reg")],
             ]
 
-            try:
-                await query.edit_message_text(
-                    "Selecciona el <b>tipo de cuadrilla</b>:",
-                    parse_mode="HTML",
-                    reply_markup=InlineKeyboardMarkup(keyboard)
-                )
-            except Exception as e:
-                if "Message is not modified" in str(e):
-                    logger.warning(f"[handle_nombre_cuadrilla] Mensaje repetido ignorado (chat_id={chat_id})")
-                else:
-                    raise
+            await query.edit_message_text(
+                "Selecciona el <b>tipo de cuadrilla</b>: 👇",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
 
-    except Exception:
+    except Exception as e:
         logger.exception("[handle_nombre_cuadrilla] Error")
         try:
             await query.message.reply_text(
-                "❌ Ocurrió un error.\n"
-                "Escribe /estado para poder indicarte en qué paso te encuentras. 😊"
+                "❌ Ocurrió un error inesperado.\n"
+                "Usa /estado para que te indique en qué paso estás. 😊"
             )
         except Exception:
             pass
@@ -1027,7 +1230,6 @@ async def handle_confirmar_tipo(update: Update, context: ContextTypes.DEFAULT_TY
                     parse_mode="HTML",
                     reply_markup=k
                 )
-
             except Exception as e:
                 if "Message is not modified" in str(e):
                     logger.warning(f"[handle_confirmar_tipo] Botón repetido ignorado (chat_id={chat_id})")
@@ -1037,7 +1239,7 @@ async def handle_confirmar_tipo(update: Update, context: ContextTypes.DEFAULT_TY
 
         if query.data == "confirmar_tipo":
             ssid = ud.get("spreadsheet_id")
-            row  = ud.get("row")
+            row = ud.get("row")
             if not ssid or not row:
                 await query.edit_message_text("❌ No hay registro activo. Usa /ingreso para iniciar.")
                 return
@@ -1047,13 +1249,21 @@ async def handle_confirmar_tipo(update: Update, context: ContextTypes.DEFAULT_TY
                 await query.edit_message_text("⚠️ No encontré la selección. Vuelve a elegir el tipo.")
                 return
 
-        # ✅ Guardamos en Sheets
-        
             try:
-                update_single_cell(ssid, SHEET_TITLE, COL["TIPO DE CUADRILLA"], row, tipo)
+                # ✅ Corrección: usar columna + fila para el rango
+                col = COL["TIPO DE CUADRILLA"]
+                rango = f"{SHEET_TITLE}!{col}{row}"
+
+                sheets_service.spreadsheets().values().update(
+                    spreadsheetId=ssid,
+                    range=rango,
+                    valueInputOption="USER_ENTERED",
+                    body={"values": [[tipo]]}
+                ).execute()
+
                 logger.info(
                     f"[EVIDENCIA] USER_ID={chat_id} | ID_REGISTRO={ud.get('id_registro')} "
-                    f"| Paso=Tipo Cuadrilla | Tipo='{tipo}' | Row={row}"
+                    f"| Paso=Tipo Cuadrilla | Tipo='{tipo}' | Row={row} | Rango={rango}"
                 )
 
                 ud["tipo"] = tipo
@@ -1081,10 +1291,12 @@ async def handle_confirmar_tipo(update: Update, context: ContextTypes.DEFAULT_TY
         logger.exception("[handle_confirmar_tipo] Error inesperado")
         try:
             await query.message.reply_text(
-                "❌ Ocurrió un error inesperado.\nEscribe /estado para poder indicarte en que paso estás. 😊"
+                "❌ Ocurrió un error inesperado.\n"
+                "Escribe /estado para poder indicarte en qué paso estás. 😊"
             )
         except Exception:
-            pass      
+            pass
+    
 
 # ================== FOTO INICIO + HORA INGRESO ==================
 
@@ -1202,31 +1414,50 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
-    # Ubicación de INICIO
+        # ================== UBICACIÓN DETALLADA ==================
+        ubic = obtener_ubicacion_detallada(lat, lon)
+        dep = ubic["departamento"]
+        prov = ubic["provincia"]
+        dist = ubic["distrito"]
+
+        # ================== UBICACIÓN DE INICIO ==================
         if ud.get("paso") == "esperando_live_inicio":
             update_single_cell(ssid, SHEET_TITLE, COL["LATITUD"], row, f"{lat:.6f}")
             update_single_cell(ssid, SHEET_TITLE, COL["LONGITUD"], row, f"{lon:.6f}")
+            update_single_cell(ssid, SHEET_TITLE, COL["DEPARTAMENTO"], row, dep)
+            update_single_cell(ssid, SHEET_TITLE, COL["PROVINCIA"], row, prov)
+            update_single_cell(ssid, SHEET_TITLE, COL["DISTRITO"], row, dist)
+
             logger.info(
                 f"[EVIDENCIA] USER_ID={chat_id} | ID_REGISTRO={ud.get('id_registro')} "
-                f"| Paso=Ubicación INICIO | Lat={lat:.6f}, Lon={lon:.6f} | Row={row}"
+                f"| Paso=Ubicación INICIO | Lat={lat:.6f}, Lon={lon:.6f} | "
+                f"Dep={dep}, Prov={prov}, Dist={dist} | Row={row}"
             )
+
             ud["paso"] = "en_jornada"   # jornada abierta hasta /salida
             user_data[chat_id] = ud
 
             await update.message.reply_text(
-                "✅ Ubicación de inicio registrada.\n\n"
+                f"✅ Ubicación de inicio registrada.\n"
+                f"🗺️ {dist}, {prov}, {dep}\n\n"
                 "💭 Recuerda que para concluir tu jornada debes usar /salida."
             )
             return
 
-    # Ubicación de SALIDA
+        # ================== UBICACIÓN DE SALIDA ==================
         if ud.get("paso") == "esperando_live_salida":
             update_single_cell(ssid, SHEET_TITLE, COL["LATITUD SALIDA"], row, f"{lat:.6f}")
             update_single_cell(ssid, SHEET_TITLE, COL["LONGITUD SALIDA"], row, f"{lon:.6f}")
+            update_single_cell(ssid, SHEET_TITLE, COL["DEPARTAMENTO SALIDA"], row, dep)
+            update_single_cell(ssid, SHEET_TITLE, COL["PROVINCIA SALIDA"], row, prov)
+            update_single_cell(ssid, SHEET_TITLE, COL["DISTRITO SALIDA"], row, dist)
+
             logger.info(
                 f"[EVIDENCIA] USER_ID={chat_id} | ID_REGISTRO={ud.get('id_registro')} "
-                f"| Paso=Ubicación SALIDA | Lat={lat:.6f}, Lon={lon:.6f} | Row={row}"
+                f"| Paso=Ubicación SALIDA | Lat={lat:.6f}, Lon={lon:.6f} | "
+                f"Dep={dep}, Prov={prov}, Dist={dist} | Row={row}"
             )
+
             # 🚦 Marcar finalización aquí
             ud["paso"] = "finalizado"
             user_data[chat_id] = ud
@@ -1235,7 +1466,8 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.info(f"[FINALIZADO] Registro cerrado para {chat_id} en row {row}")
 
             await update.message.reply_text(
-                "✅ Ubicación de salida registrada.\n\n"
+                f"✅ Ubicación de salida registrada.\n"
+                f"🗺️ {dist}, {prov}, {dep}\n\n"
                 "👷‍♂️ Jornada finalizada.\n"
                 "🏠 Buen regreso a casa. Nos vemos mañana 💪",
                 parse_mode="HTML"
@@ -1250,6 +1482,7 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         except Exception:
             pass
+
 
 # ================== SALIDA ==================
 
@@ -1277,7 +1510,7 @@ async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 🚦 Validar horario laboral (excepto usuarios de prueba)
     if chat_id not in USUARIOS_TEST and not dentro_horario_laboral():
         await update.message.reply_text(
-            "⚠️ Solo puedes registrar tu <b>asistencia</b> entre las <b>07:00 AM y 11:30 PM</b>.",
+            "⚠️ Solo puedes registrar tu <b>asistencia</b> entre las <b>07:00 AM y 11:59 PM</b>.",
             parse_mode="HTML"
         )
         logger.warning(f"[SALIDA BLOQUEADA] Usuario {user.id} fuera de horario")
@@ -1285,7 +1518,7 @@ async def salida(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 🚦 Validar pasos obligatorios antes de permitir salida
     if not ud.get("cuadrilla"):
-        await update.message.reply_text("⚠️ No puedes registrar salida todavía.\n""Te falta escribir el <b>nombre de tu cuadrilla ✍️</b>", parse_mode="HTML")
+        await update.message.reply_text("⚠️ No puedes registrar salida todavía.\n""Te falta escribir el <b>ID Phoenix de tu cuadrilla ✍️</b>", parse_mode="HTML")
         return 
 
     if not ud.get("hora_ingreso"):
@@ -1712,7 +1945,7 @@ def main():
     )
 
     # --- MENSAJES ---
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, nombre_cuadrilla))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_texto_fuera_de_lugar))
     app.add_handler(MessageHandler(filters.PHOTO, manejar_fotos))
     app.add_handler(MessageHandler(filters.LOCATION, manejar_ubicacion))
     app.add_handler(CommandHandler("estado", estado))
@@ -1736,7 +1969,121 @@ def main():
     
     # --- ARRANQUE EN POLLING ---
     logger.info("🚀 Bot de Asistencia (privado) en ejecución...")
+    gc.collect()
+    logger.info("🧠 Memoria optimizada antes de iniciar polling.")
     app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
 
+def verificar_recursos_iniciales():
+    """
+    Valida que las carpetas y archivos esenciales existan en Google Drive antes de iniciar el bot.
+    Crea los faltantes automáticamente.
+    """
+    logger.info("🔎 Verificando estructura base en Google Drive...")
+
+    try:
+        # 1️⃣ Verificar acceso a carpeta principal
+        meta = drive_service.files().get(
+            fileId=MAIN_FOLDER_ID,
+            fields="id, name, driveId",
+            supportsAllDrives=True
+        ).execute()
+        logger.info(f"✅ Carpeta principal detectada: {meta['name']} ({meta['id']})")
+
+    except Exception as e:
+        logger.error(f"❌ No se puede acceder a la carpeta principal. Error: {e}")
+        raise SystemExit("⛔ La cuenta de servicio no tiene acceso a la carpeta principal en Drive.")
+
+    # 2️⃣ Verificar / crear carpeta IMAGENES
+    try:
+        query_img = (
+            f"name='IMAGENES' and '{MAIN_FOLDER_ID}' in parents "
+            "and mimeType='application/vnd.google-apps.folder' and trashed=false"
+        )
+        res_img = drive_service.files().list(
+            q=query_img,
+            fields="files(id, name)",
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True
+        ).execute()
+
+        if res_img.get("files"):
+            img_folder_id = res_img["files"][0]["id"]
+            logger.info(f"📂 Carpeta IMAGENES OK → ID={img_folder_id}")
+        else:
+            meta_img = {
+                "name": "IMAGENES",
+                "mimeType": "application/vnd.google-apps.folder",
+                "parents": [MAIN_FOLDER_ID],
+            }
+            new_img = drive_service.files().create(
+                body=meta_img, fields="id", supportsAllDrives=True
+            ).execute()
+            logger.info(f"🆕 Carpeta IMAGENES creada → ID={new_img['id']}")
+
+    except Exception as e:
+        logger.error(f"❌ Error creando/verificando carpeta IMAGENES: {e}")
+        raise SystemExit("⛔ Error al crear/verificar la carpeta IMAGENES.")
+
+    # 3️⃣ Verificar / crear archivo ASISTENCIA_CUADRILLAS_DISP_ALTO_VALOR
+    try:
+        query_ass = (
+            f"name='ASISTENCIA_CUADRILLAS_DISP_ALTO_VALOR' and '{MAIN_FOLDER_ID}' in parents "
+            "and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false"
+        )
+        res_ass = drive_service.files().list(
+            q=query_ass,
+            fields="files(id, name)",
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True
+        ).execute()
+
+        if res_ass.get("files"):
+            asistencia_id = res_ass["files"][0]["id"]
+            logger.info(f"📄 Archivo ASISTENCIA_CUADRILLAS_DISP_ALTO_VALOR OK → ID={asistencia_id}")
+        else:
+            meta_ass = {
+                "name": "ASISTENCIA_CUADRILLAS_DISP_ALTO_VALOR",
+                "mimeType": "application/vnd.google-apps.spreadsheet",
+                "parents": [MAIN_FOLDER_ID],
+            }
+            new_ass = drive_service.files().create(
+                body=meta_ass, fields="id", supportsAllDrives=True
+            ).execute()
+            asistencia_id = new_ass["id"]
+
+            # Crear cabeceras en la nueva hoja
+            sheets_service.spreadsheets().values().update(
+                spreadsheetId=asistencia_id,
+                range="A1:V1",
+                valueInputOption="RAW",
+                body={"values": [HEADERS]},
+            ).execute()
+            logger.info(f"🧾 Archivo ASISTENCIA_CUADRILLAS_DISP_ALTO_VALOR creado con encabezados OK → ID={asistencia_id}")
+
+    except Exception as e:
+        logger.error(f"❌ Error creando/verificando archivo ASISTENCIA_CUADRILLAS_DISP_ALTO_VALOR: {e}")
+        raise SystemExit("⛔ Error al crear/verificar el archivo ASISTENCIA_CUADRILLAS_DISP_ALTO_VALOR.")
+
+    # 4️⃣ Verificar que exista el archivo CUADRILLAS ACTIVAS
+    try:
+        res_cuad = drive_service.files().list(
+            q=f"name='CUADRILLAS ACTIVAS' and '{MAIN_FOLDER_ID}' in parents and trashed=false",
+            fields="files(id, name)",
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True
+        ).execute()
+
+        if res_cuad.get("files"):
+            logger.info(f"📘 Archivo CUADRILLAS ACTIVAS OK → ID={res_cuad['files'][0]['id']}")
+        else:
+            logger.warning("⚠️ No se encontró el archivo 'CUADRILLAS ACTIVAS' dentro de la carpeta principal.")
+            logger.warning("⚠️ Este archivo debe cargarse manualmente desde tu Google Drive.")
+    except Exception as e:
+        logger.error(f"❌ Error buscando archivo CUADRILLAS ACTIVAS: {e}")
+
+    logger.info("✅ Todos los recursos esenciales están listos.")
+
+
 if __name__ == "__main__":
+    verificar_recursos_iniciales()  # <-- NUEVA VALIDACIÓN
     main()
