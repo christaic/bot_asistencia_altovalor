@@ -21,3 +21,6 @@ pandas==2.2.3
 
 # --- Utilidades opcionales ---
 aiofiles==23.2.1
+python-dotenv
+
+
