@@ -25,6 +25,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from pytz import timezone
 
 
+
 #== RESET REGISTRO 00:00==
 
 async def resetear_registros():
@@ -83,11 +84,13 @@ def marcar_registro_completo(chat_id: int):
     registro_diario[chat_id] = date.today().isoformat()
 
 
+load_dotenv()
+
 # ================== ZONA HORARIA ==================
 LIMA_TZ = timezone("America/Lima")
 
 # ================== CONFIGURACIÓN ==================
-BOT_TOKEN = "8426434999:AAF8JQDhkWBbcaLqxtdIWGjj1-j2wmToWVU"  # Token del bot
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # Token del bot
 NOMBRE_CARPETA_DRIVE = "ASISTENCIA_SGA_ALTOVALOR"
 DRIVE_ID = "0AN8pG_lPt1dtUk9PVA"
 GLOBAL_SHEET_NAME = "ASISTENCIA_CUADRILLAS_DISP_ALTO_VALOR"
