@@ -92,7 +92,7 @@ NOMBRE_CARPETA_DRIVE = "ASISTENCIA_SGA_ALTOVALOR"
 DRIVE_ID = "0AN8pG_lPt1dtUk9PVA"
 GLOBAL_SHEET_NAME = "ASISTENCIA_CUADRILLAS_DISP_ALTO_VALOR"
 ORDENAMIENTO_SHEET_NAME = "ASISTENCIA_ORDENAMIENTO"
-USUARIOS_TEST = {7175478712, 7286377190}
+USUARIOS_TEST = {}
 
 # Carga de credenciales desde variable de entorno
 CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS_JSON")
@@ -905,7 +905,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "1️⃣ Usa /ingreso para registrar tu <b>Inicio de jornada laboral</b>.\n"
         "   - Ingresa tu <b>ID_PHOENIX</b> 🪪 (código de 1 a 4 dígitos de tu cuadrilla).\n"
         "   - El bot cargará automáticamente tus datos (cuadrilla, proveedor, zona).\n\n"
-        "2️⃣ Luego selecciona tu <b>tipo de cuadrilla</b> 🟠 DISPONIBILIDAD o ⚪ REGULAR.\n\n"
+        "2️⃣ Luego selecciona tu <b>tipo de cuadrilla</b> 🟠 DISPONIBILIDAD,⚪ REGULAR u 🟢 ORDENAMIENTO.\n\n"
         "3️⃣ Envía tus fotos y ubicación en tiempo real cuando se te indique 📸📍.\n\n"
         "4️⃣ Usa /salida para registrar el <b>Fin de jornada laboral</b> 🏁.\n\n"
         "📌 Puedes usar /estado en cualquier momento para saber en qué paso estás 💪.\n\n"
@@ -926,7 +926,7 @@ async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "1️⃣ Usa /ingreso para registrar tu <b>Inicio de jornada laboral</b>.\n"
         "   ➤ Ingresa tu <b>ID_PHOENIX</b> 🪪 (código de 1 a 4 dígitos de tu cuadrilla).\n"
         "   ➤ El bot cargará automáticamente tus datos: cuadrilla, proveedor y zona.\n\n"
-        "2️⃣ Luego selecciona el <b>tipo de cuadrilla</b> 🟠 DISPONIBILIDAD o ⚪ REGULAR.\n\n"
+        "2️⃣ Luego selecciona el <b>tipo de cuadrilla</b> 🟠 DISPONIBILIDAD,⚪ REGULAR u 🟢 ORDENAMIENTO.\n\n"
         "3️⃣ Envía tus fotos y ubicación en tiempo real cuando se te indique 📸📍.\n\n"
         "4️⃣ Usa /salida para registrar tu <b>Fin de jornada</b> 🏁.\n\n"
         "📌 En cualquier momento puedes usar /estado para ver en qué paso estás 💪.\n\n"
