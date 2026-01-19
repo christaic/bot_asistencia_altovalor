@@ -91,6 +91,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")  # Token del bot
 NOMBRE_CARPETA_DRIVE = "ASISTENCIA_SGA_ALTOVALOR"
 DRIVE_ID = "0AN8pG_lPt1dtUk9PVA"
 GLOBAL_SHEET_NAME = "ASISTENCIA_CUADRILLAS_DISP_ALTO_VALOR"
+ORDENAMIENTO_SHEET_NAME = "ASISTENCIA_ORDENAMIENTO"
 USUARIOS_TEST = {7175478712, 7286377190}
 
 # Carga de credenciales desde variable de entorno
@@ -225,6 +226,50 @@ def ensure_global_spreadsheet() -> str:
         body=meta, fields="id", supportsAllDrives=True
     ).execute()
     return created["id"]
+
+
+# ---- ASISTENCIA ORDENAMIENTO -----
+
+def ensure_hoja_ordenamiento():
+    """
+    Verifica o crea el archivo 'ASISTENCIA_ORDENAMIENTO'.
+    Devuelve su file_id.
+    """
+    nombre_archivo = ORDENAMIENTO_SHEET_NAME
+    query = (
+        f"name='{nombre_archivo}' and '{MAIN_FOLDER_ID}' in parents and "
+        f"mimeType='application/vnd.google-apps.spreadsheet' and trashed=false"
+    )
+
+    res = drive_service.files().list(
+        q=query, fields="files(id, name)", supportsAllDrives=True, includeItemsFromAllDrives=True
+    ).execute()
+
+    files = res.get("files", [])
+
+    if not files:
+        # Si no existe, lo creamos
+        meta = {
+            "name": nombre_archivo,
+            "mimeType": "application/vnd.google-apps.spreadsheet",
+            "parents": [MAIN_FOLDER_ID],
+        }
+        created = drive_service.files().create(
+            body=meta, fields="id", supportsAllDrives=True
+        ).execute()
+        ssid = created["id"]
+        
+        # Le ponemos los encabezados de una vez
+        try:
+             sheets_service.spreadsheets().values().update(
+                spreadsheetId=ssid, range="A1:V1", valueInputOption="RAW", body={"values": [HEADERS]}
+            ).execute()
+        except:
+            pass
+        return ssid
+
+    return files[0]["id"]
+
 
 def ensure_asistencia_cuadrillas_v1():
     """
@@ -683,7 +728,8 @@ def mostrar_botonera(paso: str):
     if paso == "tipo":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("🟠 DISPONIBILIDAD", callback_data="tipo_disp")],
-            [InlineKeyboardButton("⚪ REGULAR", callback_data="tipo_reg")]
+            [InlineKeyboardButton("⚪ REGULAR", callback_data="tipo_reg")],
+            [InlineKeyboardButton("🟢 ORDENAMIENTO", callback_data="tipo_ord")]
         ])    
     
     if paso == "confirmar_tipo":
@@ -1079,32 +1125,15 @@ async def handle_nombre_cuadrilla(update: Update, context: ContextTypes.DEFAULT_
                 await query.edit_message_text("⚠️ No encontré el ID_PHOENIX. Escríbelo nuevamente por favor.")
                 return
 
-            # 1️⃣ Garantizar el nuevo sheet
-            ssid = ensure_asistencia_cuadrillas_v1()
-            ensure_sheet_and_headers(ssid)
-            logger.info(f"[FLOW] usando ssid={ssid}")
-
-            # 2️⃣ Crear fila base con los datos del ID Phoenix
-            if not ud.get("spreadsheet_id") or not ud.get("row"):
-                base = {
-                    "ID_PHOENIX": ud.get("id_phoenix", ""),
-                    "CUADRILLA": ud.get("cuadrilla", ""),
-                    "PROVEEDOR": ud.get("proveedor", ""),
-                    "ZONA": ud.get("zona", ""),
-                    "TIPO DE CUADRILLA": "",
-                }
-                row = append_base_row(ssid, base, chat_id)
-                ud["spreadsheet_id"] = ssid
-                ud["row"] = row
-                logger.info(f"[OK] Registro base creado: row={row}, ID_PHOENIX={ud['id_phoenix']}")
 
             # 3️⃣ Avanzar directamente al paso "tipo de cuadrilla"
             ud["paso"] = "tipo"
-            ud.pop("botones_activos", None)
+            ud["botones_activos"] = ["tipo_disp", "tipo_reg", "tipo_ord"] # Agregamos el nuevo botón a la lista segura
 
             keyboard = [
                 [InlineKeyboardButton("🟠 DISPONIBILIDAD", callback_data="tipo_disp")],
                 [InlineKeyboardButton("⚪ REGULAR", callback_data="tipo_reg")],
+                [InlineKeyboardButton("🟢 ORDENAMIENTO", callback_data="tipo_ord")]
             ]
 
             await query.edit_message_text(
@@ -1144,7 +1173,7 @@ async def handle_tipo_cuadrilla(update: Update, context: ContextTypes.DEFAULT_TY
     ud = user_data.setdefault(chat_id, {})
 
     # ⚡ Solo aceptar botones válidos
-    if query.data not in ("tipo_disp", "tipo_reg"):
+    if query.data not in ("tipo_disp", "tipo_reg", "tipo_ord"):
         await query.answer("⚠️ Opción no válida.")
         return
     
@@ -1157,7 +1186,13 @@ async def handle_tipo_cuadrilla(update: Update, context: ContextTypes.DEFAULT_TY
 
     try:
     # Guarda selección provisional (sin escribir aún en el Sheet)
-        seleccion = "DISPONIBILIDAD" if query.data == "tipo_disp" else "REGULAR"
+        if query.data == "tipo_disp":
+            seleccion = "DISPONIBILIDAD"
+        elif query.data == "tipo_reg":
+            seleccion = "REGULAR"
+        else:
+            seleccion = "ORDENAMIENTO"
+
         ud["tipo_seleccionado"] = seleccion
         ud["paso"] = "confirmar_tipo"
         # Guardamos los botones activos válidos en este estado
@@ -1237,56 +1272,64 @@ async def handle_confirmar_tipo(update: Update, context: ContextTypes.DEFAULT_TY
                     raise
             return
 
+
         if query.data == "confirmar_tipo":
-            ssid = ud.get("spreadsheet_id")
-            row = ud.get("row")
-            if not ssid or not row:
-                await query.edit_message_text("❌ No hay registro activo. Usa /ingreso para iniciar.")
-                return
-
             tipo = ud.get("tipo_seleccionado", "")
-            if not tipo:
-                await query.edit_message_text("⚠️ No encontré la selección. Vuelve a elegir el tipo.")
-                return
-
+            
+            # ========================================================
+            # 🚀 AQUÍ DECIDIMOS EL DESTINO Y CREAMOS LA FILA 
+            # ========================================================
             try:
-                # ✅ Corrección: usar columna + fila para el rango
-                col = COL["TIPO DE CUADRILLA"]
-                rango = f"{SHEET_TITLE}!{col}{row}"
+                ssid = None
+                
+                # 1️⃣ Elegimos el Spreadsheet ID según el tipo
+                if tipo == "ORDENAMIENTO":
+                    ssid = ensure_hoja_ordenamiento() # Función nueva
+                    logger.info(f"[ROUTER] Usuario {chat_id} va a hoja ORDENAMIENTO")
+                else:
+                    ssid = ensure_asistencia_cuadrillas_v1() # Hoja normal
+                    logger.info(f"[ROUTER] Usuario {chat_id} va a hoja REGULAR/DISP")
 
-                sheets_service.spreadsheets().values().update(
-                    spreadsheetId=ssid,
-                    range=rango,
-                    valueInputOption="USER_ENTERED",
-                    body={"values": [[tipo]]}
-                ).execute()
+                # 2️⃣ Aseguramos cabeceras en ese sheet específico
+                ensure_sheet_and_headers(ssid)
 
-                logger.info(
-                    f"[EVIDENCIA] USER_ID={chat_id} | ID_REGISTRO={ud.get('id_registro')} "
-                    f"| Paso=Tipo Cuadrilla | Tipo='{tipo}' | Row={row} | Rango={rango}"
-                )
+                # 3️⃣ Preparamos los datos base (que antes hacíamos en el paso 1)
+                base_data = {
+                    "ID_PHOENIX": ud.get("id_phoenix", ""),
+                    "CUADRILLA": ud.get("cuadrilla", ""),
+                    "PROVEEDOR": ud.get("proveedor", ""),
+                    "ZONA": ud.get("zona", ""),
+                    "TIPO DE CUADRILLA": tipo, # Ya tenemos el tipo aquí
+                }
 
+                # 4️⃣ CREAMOS LA FILA AHORA SÍ
+                row = append_base_row(ssid, base_data, chat_id)
+                
+                # 5️⃣ Guardamos en memoria para el resto del flujo
+                ud["spreadsheet_id"] = ssid
+                ud["row"] = row
                 ud["tipo"] = tipo
+                
+                # ========================================================
+
                 ud["paso"] = "esperando_selfie_inicio"
                 ud.pop("botones_activos", None)
 
-                try:
-                    await query.edit_message_text(
-                        f"Tipificación de cuadrilla confirmada: <b>{tipo}</b>.\n\n📸 Envía tu foto de <b>Inicio con tus EPPs completos</b>.",
-                        parse_mode="HTML"
-                    )
-                except Exception as e:
-                    if "Message is not modified" in str(e):
-                        logger.warning(f"[handle_confirmar_tipo] Mensaje repetido ignorado (chat_id={chat_id})")
-                    else:
-                        raise
+                await query.edit_message_text(
+                    f"✅ Cuadrilla de <b>{tipo}</b> registrada.\n\n📸 Envía tu foto de <b>Inicio con tus EPPs completos</b>.",
+                    parse_mode="HTML"
+                )
+
+            except Exception as e:
+                logger.error(f"[ERROR] Creando fila en confirmar_tipo: {e}")
+                await query.edit_message_text("❌ Error creando el registro en Excel. Intenta de nuevo.")
+
 
             except Exception as e:
                 logger.error(f"[ERROR] confirm_tipo: {e}")
                 await query.edit_message_text(
                     "⚠️ No pude registrar tu selección.\nEscribe /estado para continuar."
                 )
-
     except Exception:
         logger.exception("[handle_confirmar_tipo] Error inesperado")
         try:
@@ -2080,6 +2123,13 @@ def verificar_recursos_iniciales():
             logger.warning("⚠️ Este archivo debe cargarse manualmente desde tu Google Drive.")
     except Exception as e:
         logger.error(f"❌ Error buscando archivo CUADRILLAS ACTIVAS: {e}")
+
+    # 5️⃣ Verificar / crear archivo ASISTENCIA_ORDENAMIENTO (NUEVO)
+    try:
+        ensure_hoja_ordenamiento() # Llamamos a la función que ya creaste
+        logger.info(f"🧹 Verificación de hoja ORDENAMIENTO completada.")
+    except Exception as e:
+        logger.error(f"❌ Error verificando hoja ORDENAMIENTO: {e}")
 
     logger.info("✅ Todos los recursos esenciales están listos.")
 
