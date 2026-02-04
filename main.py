@@ -1,3 +1,5 @@
+import json
+from shapely.geometry import shape, Point #
 import uuid
 import asyncio
 import re
@@ -24,6 +26,60 @@ from googleapiclient.http import MediaIoBaseUpload
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from pytz import timezone
 from dotenv import load_dotenv
+
+
+# ==============================================================================
+# 🌍 GESTIÓN DE ZONAS Y GEOFENCING (Carga de Mapas)
+# ==============================================================================
+
+def cargar_poligonos_geojson(ruta="zonas.geojson"):
+    """Carga el archivo GeoJSON y prepara los polígonos para validar."""
+    try:
+        with open(ruta, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        zonas_dict = {}
+        count = 0
+        for feature in data.get('features', []):
+            # Obtenemos el nombre (ej: "SUR 1") y lo pasamos a mayúsculas
+            props = feature.get('properties', {})
+            nombre_zona = props.get('name', '').strip().upper() 
+            
+            if nombre_zona:
+                # Convierte la geometría del JSON a un Polígono matemático
+                zonas_dict[nombre_zona] = shape(feature['geometry'])
+                count += 1
+            
+        logger.info(f"🗺️ Se cargaron {count} zonas correctamente desde {ruta}.")
+        return zonas_dict
+
+    except Exception as e:
+        logger.error(f"❌ Error cargando el mapa (zonas.geojson): {e}")
+        return {}
+
+# Variable global con tus zonas cargadas en memoria
+ZONAS_GEO = cargar_poligonos_geojson()
+
+def validar_ubicacion_en_zona(lat: float, lon: float, nombre_zona_excel: str) -> bool:
+    """Devuelve True si la coordenada está DENTRO de la zona asignada."""
+    # Limpiamos el nombre que viene del Excel para que coincida con el GeoJSON
+    zona_target = str(nombre_zona_excel).strip().upper()
+    
+    poligono = ZONAS_GEO.get(zona_target)
+    
+    # Si la zona del Excel no tiene mapa dibujado, dejamos pasar (para no bloquear por error)
+    if not poligono:
+        logger.warning(f"[GEO] La zona '{zona_target}' no tiene mapa definido. Se permite acceso.")
+        return True 
+    
+    # Verificamos si el punto está dentro
+    punto_tecnico = Point(lon, lat)
+    esta_dentro = poligono.contains(punto_tecnico)
+    
+    logger.info(f"[GEO CHECK] Zona: {zona_target} | Técnico: {lat}, {lon} | ¿Dentro?: {esta_dentro}")
+    return esta_dentro
+
+
 
 #== RESET REGISTRO 00:00==
 
@@ -1418,52 +1474,78 @@ async def foto_ingreso(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ================== UBICACIÓN INICIO / SALIDA ==================
 async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Solo chat privado y mensajes con location
+    # Validaciones básicas (Chat privado, Location, Live)
     if not es_chat_privado(update) or not update.message or not update.message.location:
         return
     
     chat_id = update.effective_chat.id
     user = update.effective_user
 
-    # 🚦 Validación: solo aceptar UBICACIÓN en este paso
+    # 🚦 Validación de flujo
     if not await validar_flujo(update, chat_id):
         return
     
     ud = user_data.setdefault(chat_id, {})
     ssid = ud.get("spreadsheet_id")
     id_registro = ud.get("id_registro")
+    
     if not ssid or not id_registro:
         await update.message.reply_text("⚠️ No encontré tu registro activo. Usa /ingreso para iniciar de nuevo.")
-        logger.warning(f"[UBICACIÓN] {user.username} ({chat_id}) intentó sin registro activo")
         return
 
-    # Buscar la fila activa en Sheets (más robusto que confiar solo en RAM)
+    # Buscar fila en Excel
     row = find_active_row(ssid, id_registro)
     if not row:
-        await update.message.reply_text("⚠️ Tuvimos un problema. Usa /ingreso para iniciar de nuevo.")
-        logger.error(f"[UBICACIÓN] No se encontró row activo para {chat_id}")
+        await update.message.reply_text("⚠️ Error técnico: No encontré tu fila en el Excel.")
         return
 
     loc = update.message.location
     lat, lon = loc.latitude, loc.longitude
     is_live = bool(getattr(loc, "live_period", None))
 
-    # Exigir live-location (no aceptar ubicación estática)
     if not is_live:
-        await update.message.reply_text(
-            "⚠️ Por favor, comparte tu *ubicación en tiempo real*.\n\n"
-            "📎 Toca el clip ➜ Ubicación ➜ *Compartir ubicación en tiempo real*."
-        )
+        await update.message.reply_text("⚠️ Por favor, comparte tu *ubicación en tiempo real* (Live Location).")
         return
 
     try:
-        # ================== UBICACIÓN DETALLADA ==================
-        ubic = obtener_ubicacion_detallada(lat, lon)
-        dep = ubic["departamento"]
-        prov = ubic["provincia"]
-        dist = ubic["distrito"]
+        # ====================================================================
+        # 🚧 FILTRO DE ZONA (Solo para DISPONIBILIDAD) 🚧
+        # ====================================================================
+        
+        # Recuperamos el tipo de cuadrilla que eligió en los botones
+        tipo_cuadrilla = ud.get("tipo")  # "DISPONIBILIDAD", "REGULAR" u "ORDENAMIENTO"
+        paso_actual = ud.get("paso")
+        
+        # Solo validamos si es el INICIO y si el tipo es DISPONIBILIDAD
+        if paso_actual == "esperando_live_inicio" and tipo_cuadrilla == "DISPONIBILIDAD":
+            
+            zona_asignada = ud.get("zona")
+            
+            if zona_asignada:
+                # 🛑 Aquí ocurre la validación estricta
+                if not validar_ubicacion_en_zona(lat, lon, zona_asignada):
+                    await update.message.reply_text(
+                        f"🚫 <b>ACCESO DENEGADO (DISPONIBILIDAD)</b> 🚫\n\n"
+                        f"Tu zona asignada es: <b>{zona_asignada}</b>.\n"
+                        "📍 Al ser una cuadrilla de DISPONIBILIDAD, debes estar dentro de tu zona para marcar asistencia.\n\n"
+                        "⚠️ <i>Desplázate a tu zona y vuelve a intentarlo.</i>",
+                        parse_mode="HTML"
+                    )
+                    logger.warning(f"[GEO BLOCK] {chat_id} intentó marcar fuera de {zona_asignada}")
+                    return # <--- BLOQUEAMOS EL REGISTRO
+            else:
+                logger.warning(f"Usuario {chat_id} (Disp) no tiene zona asignada en memoria.")
+        
+        # Si es REGULAR u ORDENAMIENTO, el código salta esta parte y guarda normal ✅
+        # ====================================================================
 
-        # ================== UBICACIÓN DE INICIO ==================
+        # ... (AQUÍ SIGUE EL GUARDADO EN EXCEL) ...
+        
+        # Obtener dirección detallada
+        ubic = obtener_ubicacion_detallada(lat, lon)
+        dep, prov, dist = ubic["departamento"], ubic["provincia"], ubic["distrito"]
+
+        # UBICACIÓN DE INICIO
         if ud.get("paso") == "esperando_live_inicio":
             update_single_cell(ssid, SHEET_TITLE, COL["LATITUD"], row, f"{lat:.6f}")
             update_single_cell(ssid, SHEET_TITLE, COL["LONGITUD"], row, f"{lon:.6f}")
@@ -1471,23 +1553,21 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
             update_single_cell(ssid, SHEET_TITLE, COL["PROVINCIA"], row, prov)
             update_single_cell(ssid, SHEET_TITLE, COL["DISTRITO"], row, dist)
 
-            logger.info(
-                f"[EVIDENCIA] USER_ID={chat_id} | ID_REGISTRO={ud.get('id_registro')} "
-                f"| Paso=Ubicación INICIO | Lat={lat:.6f}, Lon={lon:.6f} | "
-                f"Dep={dep}, Prov={prov}, Dist={dist} | Row={row}"
-            )
+            logger.info(f"[INICIO] {chat_id} registrado en {dist}, {prov}. Tipo: {tipo_cuadrilla}")
 
-            ud["paso"] = "en_jornada"   # jornada abierta hasta /salida
+            ud["paso"] = "en_jornada"
             user_data[chat_id] = ud
 
             await update.message.reply_text(
-                f"✅ Ubicación de inicio registrada.\n"
-                f"🗺️ {dist}, {prov}, {dep}\n\n"
-                "💭 Recuerda que para concluir tu jornada debes usar /salida."
+                f"✅ <b>Inicio registrado correctamente.</b>\n"
+                f"👷 Tipo: <b>{tipo_cuadrilla}</b>\n"
+                f"📍 Ubicación: {dist}, {prov}\n\n"
+                "Buen turno 💪",
+                parse_mode="HTML"
             )
             return
 
-        # ================== UBICACIÓN DE SALIDA ==================
+        # UBICACIÓN DE SALIDA (Sin restricción de zona, pueden salir donde sea)
         if ud.get("paso") == "esperando_live_salida":
             update_single_cell(ssid, SHEET_TITLE, COL["LATITUD SALIDA"], row, f"{lat:.6f}")
             update_single_cell(ssid, SHEET_TITLE, COL["LONGITUD SALIDA"], row, f"{lon:.6f}")
@@ -1495,36 +1575,23 @@ async def manejar_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
             update_single_cell(ssid, SHEET_TITLE, COL["PROVINCIA SALIDA"], row, prov)
             update_single_cell(ssid, SHEET_TITLE, COL["DISTRITO SALIDA"], row, dist)
 
-            logger.info(
-                f"[EVIDENCIA] USER_ID={chat_id} | ID_REGISTRO={ud.get('id_registro')} "
-                f"| Paso=Ubicación SALIDA | Lat={lat:.6f}, Lon={lon:.6f} | "
-                f"Dep={dep}, Prov={prov}, Dist={dist} | Row={row}"
-            )
-
-            # 🚦 Marcar finalización aquí
             ud["paso"] = "finalizado"
             user_data[chat_id] = ud
             if chat_id not in USUARIOS_TEST:
                 marcar_registro_completo(chat_id)
-            logger.info(f"[FINALIZADO] Registro cerrado para {chat_id} en row {row}")
+            
+            logger.info(f"[FINAL] {chat_id} cerró turno en {dist}.")
 
             await update.message.reply_text(
-                f"✅ Ubicación de salida registrada.\n"
-                f"🗺️ {dist}, {prov}, {dep}\n\n"
-                "👷‍♂️ Jornada finalizada.\n"
-                "🏠 Buen regreso a casa. Nos vemos mañana 💪",
+                f"✅ <b>Salida registrada.</b>\n"
+                f"📍 {dist}, {prov}\n\n"
+                "👷‍♂️ Jornada finalizada. ¡Descansa! 🏠",
                 parse_mode="HTML"
             )
 
     except Exception:
         logger.exception("[manejar_ubicacion] Error inesperado")
-        try:
-            await update.message.reply_text(
-                "❌ Ocurrió un error registrando tu ubicación.\n"
-                "Escribe /estado para continuar correctamente."
-            )
-        except Exception:
-            pass
+        await update.message.reply_text("❌ Error guardando ubicación. Intenta de nuevo.")
 
 
 # ================== SALIDA ==================
