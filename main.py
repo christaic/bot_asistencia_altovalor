@@ -1,5 +1,4 @@
 import json
-from shapely.geometry import shape, Point #
 import uuid
 import asyncio
 import re
@@ -26,6 +25,13 @@ from googleapiclient.http import MediaIoBaseUpload
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from pytz import timezone
 from dotenv import load_dotenv
+from shapely.geometry import shape, Point
+
+# ================== LOGGING ==================
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 
 # ==============================================================================
@@ -165,11 +171,6 @@ if not CREDENTIALS_JSON:
     raise RuntimeError("❌ GOOGLE_CREDENTIALS_JSON no definido en Render")
 
 
-# ================== LOGGING ==================
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
-logger = logging.getLogger(__name__)
 
 async def log_error(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.exception("[UNHANDLED] Excepción no controlada", exc_info=context.error)
